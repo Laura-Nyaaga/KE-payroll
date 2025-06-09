@@ -1,0 +1,196 @@
+@import "tailwindcss";
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+
+/* 
+ * Theme Variables 
+ */
+
+ :root {
+  /* Light theme defaults */
+  --background: #f9fafb;
+  --card-background: #ffffff;
+  --primary-text: #111827;
+  --secondary-text: #4b5563;
+  --muted-text: #6b7280;
+  --border-color: #e5e7eb;
+  --input-background: #ffffff;
+  --input-border: #d1d5db;
+  --input-focus-border: #3b82f6;
+  --input-focus-ring: rgba(59, 130, 246, 0.5);
+  --input-placeholder: #9ca3af;
+  --primary-button: #3b82f6;
+  --primary-button-hover: #2563eb;
+  --primary-button-text: #ffffff;
+  --secondary-button: #f3f4f6;
+  --secondary-button-hover: #e5e7eb;
+  --secondary-button-text: #1f2937;
+  --accent-color: #3b82f6;
+  --success-color: #10b981;
+  --warning-color: #f59e0b;
+  --error-color: #ef4444;
+  --header-background: #ffffff;
+  --sidebar-background: #f3f4f6;
+  --sidebar-hover: #e5e7eb;
+  --sidebar-active: #dbeafe;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* Dark theme overrides */
+[data-theme="dark"] {
+  --background: #111827;
+  --card-background: #1f2937;
+  --primary-text: #f9fafb;
+  --secondary-text: #e5e7eb;
+  --muted-text: #9ca3af;
+  --border-color: #374151;
+  --input-background: #1f2937;
+  --input-border: #4b5563;
+  --input-focus-border: #3b82f6;
+  --input-focus-ring: rgba(59, 130, 246, 0.5);
+  --input-placeholder: #6b7280;
+  --primary-button: #3b82f6;
+  --primary-button-hover: #2563eb;
+  --primary-button-text: #ffffff;
+  --secondary-button: #374151;
+  --secondary-button-hover: #4b5563;
+  --secondary-button-text: #f9fafb;
+  --accent-color: #3b82f6;
+  --success-color: #10b981;
+  --warning-color: #f59e0b;
+  --error-color: #ef4444;
+  --header-background: #1f2937;
+  --sidebar-background: #111827;
+  --sidebar-hover: #2d3748;
+  --sidebar-active: #1e3a8a;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.25);
+  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px 0 rgba(0, 0, 0, 0.26);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.26);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+}
+
+/* Form-specific styles that adapt to theme */
+.form-control {
+  background-color: var(--input-background);
+  color: var(--primary-text);
+  border: 1px solid var(--input-border);
+}
+
+.form-control:focus {
+  border-color: var(--input-focus-border);
+  box-shadow: 0 0 0 2px var(--input-focus-ring);
+}
+
+.form-control::placeholder {
+  color: var(--input-placeholder);
+}
+
+.form-label {
+  color: var(--secondary-text);
+}
+
+.btn-primary {
+  background-color: var(--primary-button);
+  color: var(--primary-button-text);
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-button-hover);
+}
+
+.btn-secondary {
+  background-color: var(--secondary-button);
+  color: var(--secondary-button-text);
+}
+
+.btn-secondary:hover {
+  background-color: var(--secondary-button-hover);
+}
+
+/* Card styles */
+.card {
+  background-color: var(--card-background);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow);
+}
+
+/* Table styles */
+table {
+  color: var(--primary-text);
+  border-color: var(--border-color);
+}
+
+th {
+  background-color: var(--sidebar-background);
+}
+
+tr:nth-child(even) {
+  background-color: var(--input-background);
+}
+
+/* Apply theme to all basic containers */
+body {
+  background-color: var(--background);
+  color: var(--primary-text);
+}
+
+/* Smooth transitions when switching themes */
+body, *, *::before, *::after {
+  transition: background-color 0.3s ease-in-out, border-color 0.3s ease-in-out, color 0.3s ease-in-out;
+}
+
+
+/* @import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+} */
