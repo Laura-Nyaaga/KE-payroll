@@ -49,34 +49,24 @@ export default function PayrollRow({ employee, earningsTypes, deductionsTypes, s
         );
       })}
 
-      {/* Deductions - Fixed to handle empty arrays */}
-      {deductionsTypes.map((type) => {
-        const key = `deduction_${type}`;
-        if (!visibleColumns[key]) return null;
-        
-        const deduction = (employee.deductions || []).find(d => d.name === type); // Changed from 'type' to 'name'
-        return (
-          <td key={key} className="border px-4 py-2">
-            {deduction ? formatCurrency(deduction.amount) : '0.00'}
-          </td>
-        );
-      })}
+    
 
-      {visibleColumns.totalEarnings && (
+      {/* {visibleColumns.totalEarnings && (
         <td className="border px-4 py-2">
           {formatCurrency(employee.totalEarnings || 0)}
         </td>
-      )}
+      )} */}
 
-      {visibleColumns.totalDeductions && (
+
+       {visibleColumns.grossPay && (
         <td className="border px-4 py-2">
-          {formatCurrency(employee.totalDeductions || 0)}
+          {formatCurrency(employee.grossPay || 0)}
         </td>
       )}
 
-      {visibleColumns.grossPay && (
+       {visibleColumns.paye && (
         <td className="border px-4 py-2">
-          {formatCurrency(employee.grossPay || 0)}
+          {formatCurrency(statutory.paye)}
         </td>
       )}
 
@@ -98,15 +88,28 @@ export default function PayrollRow({ employee, earningsTypes, deductionsTypes, s
         </td>
       )}
 
-      {visibleColumns.paye && (
-        <td className="border px-4 py-2">
-          {formatCurrency(statutory.paye)}
-        </td>
-      )}
-
       {visibleColumns.totalStatutory && (
         <td className="border px-4 py-2">
           {formatCurrency(statutory.total)}
+        </td>
+      )}
+      
+        {/* Deductions - Fixed to handle empty arrays */}
+      {deductionsTypes.map((type) => {
+        const key = `deduction_${type}`;
+        if (!visibleColumns[key]) return null;
+        
+        const deduction = (employee.deductions || []).find(d => d.name === type); // Changed from 'type' to 'name'
+        return (
+          <td key={key} className="border px-4 py-2">
+            {deduction ? formatCurrency(deduction.amount) : '0.00'}
+          </td>
+        );
+      })}
+
+         {visibleColumns.totalDeductions && (
+        <td className="border px-4 py-2">
+          {formatCurrency(employee.totalDeductions || 0)}
         </td>
       )}
 

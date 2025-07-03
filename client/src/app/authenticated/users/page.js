@@ -241,23 +241,6 @@ export default function UsersPage() {
               </svg>
             </div>
           </div>
-
-          {/* Export Users Button */}
-          <button
-            className="flex items-center text-blue-600 hover:text-blue-800 transition-colors duration-200 p-2 rounded-md hover:bg-blue-100"
-            onClick={handleExportData}
-            disabled={isLoading || users.length === 0}
-            title="Export Users"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            <span className="ml-2 font-medium">Export</span>
-          </button>
-
-          {/* Add User Button */}
           <button
             className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2 rounded-md shadow-md transition-colors duration-200 flex items-center"
             onClick={() => setShowAddModal(true)}

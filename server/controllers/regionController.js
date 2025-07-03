@@ -1,24 +1,42 @@
-// controllers/regionController.js
+const { Op } = require('sequelize');
 const { Region, Company } = require('../models');
 const softDelete = require('../utils/softDelete');
 
 // Create Region for a specific company
 exports.createRegion = async (req, res) => {
-    try {
-        const { companyId, ...regionData } = req.body;
+  try {
+    const { companyId, name, ...rest } = req.body;
 
-        // Check if the company exists
-        const company = await Company.findByPk(companyId);
-        if (!company) {
-            return res.status(400).json({ message: 'Company not found' });
-        }
-
-        const newRegion = await Region.create({ ...regionData, companyId });
-        res.status(201).json(newRegion);
-    } catch (error) {
-        console.error('Error creating region:', error);
-        res.status(500).json({ message: 'Failed to create region', error: error.errors });
+    // Check if the company exists
+    const company = await Company.findByPk(companyId);
+    if (!company) {
+      return res.status(400).json({ message: 'Company not found' });
     }
+
+    // Check for duplicate region name in the same company
+    const existingRegion = await Region.findOne({
+      where: {
+        companyId,
+        name,
+        deletedAt: null
+      }
+    });
+
+    if (existingRegion) {
+      return res.status(409).json({
+        message: 'A region with this name already exists in this company.'
+      });
+    }
+
+    const newRegion = await Region.create({ ...rest, name, companyId });
+    res.status(201).json(newRegion);
+  } catch (error) {
+    console.error('Error creating region:', error);
+    res.status(500).json({
+      message: 'Failed to create region',
+      error: error?.errors || error.message
+    });
+  }
 };
 
 // Get all Regions (potentially filterable by company)
@@ -58,37 +76,61 @@ exports.getRegionById = async (req, res) => {
 
 // Update Region
 exports.updateRegion = async (req, res) => {
-    try {
-        const { companyId, ...regionData } = req.body;
-        const regionId = req.params.id;
+  try {
+    const { companyId, name, ...rest } = req.body;
+    const regionId = req.params.id;
 
-        // Check if the region exists and is not deleted
-        const existingRegion = await Region.findByPk(regionId, { where: { deletedAt: null } });
-        if (!existingRegion) {
-            return res.status(404).json({ message: 'Region not found or already deleted' });
-        }
-
-        // If companyId is provided, check if the company exists
-        if (companyId) {
-            const company = await Company.findByPk(companyId);
-            if (!company) {
-                return res.status(400).json({ message: 'Company not found' });
-            }
-            await Region.update({ ...regionData, companyId }, {
-                where: { id: regionId, deletedAt: null },
-            });
-        } else {
-            await Region.update(regionData, {
-                where: { id: regionId, deletedAt: null },
-            });
-        }
-
-        const updatedRegion = await Region.findByPk(regionId, { include: [{ model: Company, as: 'company' }] });
-        res.status(200).json(updatedRegion);
-    } catch (error) {
-        console.error('Error updating region:', error);
-        res.status(500).json({ message: 'Failed to update region', error: error.errors });
+    // Fetch the region to be updated
+    const existingRegion = await Region.findByPk(regionId);
+    if (!existingRegion || existingRegion.deletedAt) {
+      return res.status(404).json({ message: 'Region not found or already deleted' });
     }
+
+    const effectiveCompanyId = companyId || existingRegion.companyId;
+
+    // Validate the company if companyId is changing
+    if (companyId && companyId !== existingRegion.companyId) {
+      const company = await Company.findByPk(companyId);
+      if (!company) {
+        return res.status(400).json({ message: 'Company not found' });
+      }
+    }
+
+    // Check for name conflict in the same company
+    if (name) {
+      const conflict = await Region.findOne({
+        where: {
+          name,
+          companyId: effectiveCompanyId,
+          id: { [Op.ne]: regionId },
+          deletedAt: null
+        }
+      });
+
+      if (conflict) {
+        return res.status(409).json({
+          message: 'Another region with this name already exists in this company.'
+        });
+      }
+    }
+
+    await Region.update(
+      { ...rest, name, companyId: effectiveCompanyId },
+      { where: { id: regionId } }
+    );
+
+    const updatedRegion = await Region.findByPk(regionId, {
+      include: [{ model: Company, as: 'company' }]
+    });
+
+    res.status(200).json(updatedRegion);
+  } catch (error) {
+    console.error('Error updating region:', error);
+    res.status(500).json({
+      message: 'Failed to update region',
+      error: error?.errors || error.message
+    });
+  }
 };
 
 // Soft Delete Region

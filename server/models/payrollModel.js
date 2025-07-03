@@ -110,14 +110,20 @@ const Payroll = sequelize.define(
         key: "id",
       },
     },
-    // approvalDate: {
-    //   type: DataTypes.DATE,
-    //   allowNull: true,
-    // },
-    // processingDate: {
-    //   type: DataTypes.DATE,
-    //   allowNull: true,
-    // },
+    rejectedBy: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: User,
+        key: "id",
+        },
+        },
+        
+    rejectionReason: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    
     notes: {
       type: DataTypes.TEXT,
       allowNull: true,
@@ -158,54 +164,54 @@ const Payroll = sequelize.define(
         name: "unique_payroll_batch_per_company",
       },
     ],
-    hooks: {
-      beforeValidate: (payroll, options) => {
-        const today = new Date();
-        const currentMonth = today.getMonth(); // 0-based
-        const currentYear = today.getFullYear();
+    // hooks: {
+    //   beforeValidate: (payroll, options) => {
+    //     const today = new Date();
+    //     const currentMonth = today.getMonth(); // 0-based
+    //     const currentYear = today.getFullYear();
 
-        const start = new Date(payroll.payPeriodStartDate);
-        const end = new Date(payroll.payPeriodEndDate);
-        const payment = new Date(payroll.paymentDate);
+    //     const start = new Date(payroll.payPeriodStartDate);
+    //     const end = new Date(payroll.payPeriodEndDate);
+    //     const payment = new Date(payroll.paymentDate);
 
-        const startMonth = start.getMonth();
-        const startYear = start.getFullYear();
+    //     const startMonth = start.getMonth();
+    //     const startYear = start.getFullYear();
 
-        // Convert to YYYYMM for easy comparison
-        const startValue = startYear * 12 + startMonth;
-        const currentValue = currentYear * 12 + currentMonth;
+    //     // Convert to YYYYMM for easy comparison
+    //     const startValue = startYear * 12 + startMonth;
+    //     const currentValue = currentYear * 12 + currentMonth;
 
-        if (startValue > currentValue) {
-          throw new Error("You cannot process payroll for a future month.");
-        }
+    //     if (startValue > currentValue) {
+    //       throw new Error("You cannot process payroll for a future month.");
+    //     }
 
-        if (startValue < currentValue - 3) {
-          throw new Error(
-            "You can only process payroll up to 3 months in the past."
-          );
-        }
+    //     if (startValue < currentValue - 3) {
+    //       throw new Error(
+    //         "You can only process payroll up to 3 months in the past."
+    //       );
+    //     }
 
-        // End date must be after start date
-        if (end <= start) {
-          throw new Error("End date must be after start date.");
-        }
+    //     // End date must be after start date
+    //     if (end <= start) {
+    //       throw new Error("End date must be after start date.");
+    //     }
 
-        // Payment date must be after end date and not more than 7 days from end date
-        const maxPaymentDate = new Date(end);
-        maxPaymentDate.setDate(maxPaymentDate.getDate() + 7);
+    //     // Payment date must be after end date and not more than 7 days from end date
+    //     const maxPaymentDate = new Date(end);
+    //     maxPaymentDate.setDate(maxPaymentDate.getDate() + 7);
 
-        if (payment < end || payment > maxPaymentDate) {
-          throw new Error(
-            "Payment date must be after pay period end and within 7 days of start."
-          );
-        }
+    //     if (payment < end || payment > maxPaymentDate) {
+    //       throw new Error(
+    //         "Payment date must be after pay period end and within 7 days of start."
+    //       );
+    //     }
 
-        const totalDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
-        if (totalDays < 25 || totalDays > 30) {
-          throw new Error("Pay period must be between 25 and 30 days.");
-        }
-      },
-    },
+    //     const totalDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+    //     if (totalDays < 25 || totalDays > 30) {
+    //       throw new Error("Pay period must be between 25 and 30 days.");
+    //     }
+    //   },
+    // },
   }
 );
 

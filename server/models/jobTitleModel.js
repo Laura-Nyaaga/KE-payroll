@@ -10,7 +10,7 @@ const JobTitle = sequelize.define('JobTitle', {
     name: {
         type: DataTypes.STRING,
         allowNull: false,
-        unique: true,
+        // Removed global unique constraint
     },
     description: {
         type: DataTypes.TEXT,
@@ -45,6 +45,15 @@ const JobTitle = sequelize.define('JobTitle', {
         allowNull: true,
         defaultValue: null,
     },
+}, {
+    indexes: [
+        {
+            unique: true,
+            fields: ['name', 'companyId'],
+            name: 'unique_jobtitle_name_per_company'
+        }
+    ],
 });
+
 
 module.exports = JobTitle;

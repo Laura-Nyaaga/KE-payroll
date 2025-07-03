@@ -129,7 +129,7 @@ export default function RegionTable() {
         <table className="min-w-full border-collapse">
           <thead>
             <tr className="bg-gray-200">
-              <th className="border px-4 py-2 text-left w-16">No.</th>
+              <th className="border px-4 py-2 text-left w-16">No</th>
               <th className="border px-4 py-2 text-left">Name</th>
               <th className="border px-4 py-2 text-left">Status</th>
               {/* <th className="border px-4 py-2 text-center w-16">Status</th> */}
@@ -138,7 +138,7 @@ export default function RegionTable() {
           <tbody>
             {regions.map((region) => (
               <tr key={region.id} className="hover:bg-gray-50">
-                <td className="border px-4 py-2">{region.id}.</td>
+                {/* <td className="border px-4 py-2">{region.id}.</td> */}
                 <td className="border px-4 py-2">{region.name}</td>
                 {/* <td className="border px-4 py-2">{region.status}</td> */}
 

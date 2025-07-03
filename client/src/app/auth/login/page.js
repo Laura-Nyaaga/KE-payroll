@@ -99,8 +99,8 @@ export default function Login() {
             </div>
           </div>
           <div className="flex items-center justify-between">
-            <Link href="/auth/reset-password" passHref className="text-blue-600 hover:underline text-sm">
-              Reset Password
+            <Link href="/auth/forgot-password" passHref className="text-blue-600 hover:underline text-sm">
+              Forgot Paasword?
           </Link>
             <div className="flex items-center">
               <input type="checkbox" id="remember" className="mr-2" />

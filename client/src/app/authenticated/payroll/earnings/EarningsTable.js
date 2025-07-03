@@ -1,9 +1,11 @@
 'use client';
 import { useState } from 'react';
+import React from 'react'; // React is implicitly used by JSX, good to include
 
 export default function EarningsTable({ earnings = [], onEarningsChange }) {
   const [editingEarning, setEditingEarning] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [errors, setErrors] = useState({});
 
   // Handle opening edit modal
   const handleEditClick = (earning) => {
@@ -17,12 +19,9 @@ export default function EarningsTable({ earnings = [], onEarningsChange }) {
     setShowEditModal(false);
   };
 
-  // Handle saving edits
+  // Handle saving edits - now directly calls onEarningsChange which triggers a re-fetch
   const handleSaveEdit = (updatedEarning) => {
-    const updatedEarnings = earnings.map(earning => 
-      earning.id === updatedEarning.id ? updatedEarning : earning
-    );
-    onEarningsChange(updatedEarnings);
+    onEarningsChange(updatedEarning); // Pass the single updated earning object
     setShowEditModal(false);
   };
 
@@ -35,14 +34,29 @@ export default function EarningsTable({ earnings = [], onEarningsChange }) {
     }
   };
 
+
+  // Handle input changes in the edit form
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setEditingEarning((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+    // Clear any errors for this field
+    if (errors[name]) {
+      setErrors((prev) => ({ ...prev, [name]: null }));
+    }
+  };
+
   // Get human-readable mode
   const getModeText = (mode) => {
+    // if (!mode) return 'N/A'; // Handle cases where mode might be null/undefined
     switch(mode) {
       case 'monthly': return 'Monthly';
       case 'hourly': return 'Hourly';
       case 'daily': return 'Daily';
       case 'weekly': return 'Weekly';
-      default: return mode;
+      // default: return mode.charAt(0).toUpperCase() + mode.slice(1); // Capitalize if it's a known but not explicitly listed mode
     }
   };
 
@@ -78,7 +92,7 @@ export default function EarningsTable({ earnings = [], onEarningsChange }) {
           {earnings.length === 0 ? (
             <tr>
               <td colSpan="7" className="px-6 py-4 text-center text-gray-500">
-                No earnings found.
+                No earnings found. Click "Add Allowances" to create a new earning
               </td>
             </tr>
           ) : (
@@ -94,7 +108,7 @@ export default function EarningsTable({ earnings = [], onEarningsChange }) {
                   {getCalculationMethodText(earning.calculationMethod)}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  {getModeText(earning.mode) || 'Monthly'} 
+                  {getModeText(earning.mode)} 
                 </td>
                 <td className="p-3 py-4">{earning.isTaxable ? 'Taxable' : 'Non-Taxable'}</td>
                 <td className="px-6 py-4 whitespace-nowrap">
@@ -124,7 +138,7 @@ export default function EarningsTable({ earnings = [], onEarningsChange }) {
 
       {/* Edit Modal */}
       {showEditModal && editingEarning && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
             <h2 className="text-xl font-bold mb-4">Edit Earning</h2>
             <form
@@ -133,11 +147,14 @@ export default function EarningsTable({ earnings = [], onEarningsChange }) {
                 
                 // Create updated earning object with proper backend values
                 const formData = {
-                  ...editingEarning,
-                  earningsType: e.target.earningsType.value,
-                  // Only name can be edited, other properties like calculationMethod can't be changed
+                  ...editingEarning, // Keep existing properties
+                  // Only editable fields from the form
                   isTaxable: e.target.isTaxable.value === 'true',
-                  status: e.target.status.value
+                  status: e.target.status.value,
+                  // The earningsType (Title) is read-only in the form,
+                  // but we should ensure it's included in the payload if needed by backend.
+                  // For PATCH, usually only changed fields are sent, but providing full object is safer.
+                  earningsType: editingEarning.earningsType, 
                 };
                 
                 handleSaveEdit(formData);
@@ -167,23 +184,37 @@ export default function EarningsTable({ earnings = [], onEarningsChange }) {
                 />
               </div>
 
-              {/* Mode - Read-only */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Mode</label>
-                <input
-                  type="text"
-                  readOnly
-                  value={getModeText(editingEarning.mode)}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-200 bg-gray-100 rounded-md shadow-sm"
-                />
-              </div>
+              {/* Mode */}
+               <div>
+            <label className="block text-sm font-medium text-gray-700">Mode *</label>
+            <select
+              name="mode"
+              value={editingEarning.mode}
+              onChange={handleChange}
+              disabled={editingEarning.calculationMethod === 'percentage'}
+              className={`mt-1 block w-full px-3 py-2 border ${errors.mode ? 'border-red-300' : 'border-gray-300'} rounded-md shadow-sm focus:outline-none focus:ring-cyan-500 focus:border-cyan-500 ${
+                editingEarning.calculationMethod === 'percentage' ? 'bg-gray-100' : ''
+              }`}
+            >
+              <option value="monthly">Monthly</option>
+              <option value="weekly">Weekly</option>
+              <option value="daily">Daily</option>
+              <option value="hourly">Hourly</option>
+            </select>
+            {editingEarning.calculationMethod === 'percentage' && (
+              <p className="text-xs text-gray-500 mt-1">Percentage-based earnings must use monthly mode</p>
+            )}
+            {errors.mode && (
+              <p className="mt-1 text-sm text-red-600">{errors.mode}</p>
+            )}
+          </div>
 
               {/* Taxable Status */}
               <div>
                 <label className="block text-sm font-medium text-gray-700">Tax Status</label>
                 <select
                   name="isTaxable"
-                  defaultValue={editingEarning.isTaxable}
+                  defaultValue={editingEarning.isTaxable ? 'true' : 'false'} // Ensure boolean value is handled correctly for select
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-cyan-500 focus:border-cyan-500"
                 >
                   <option value="true">Taxable</option>
@@ -205,7 +236,7 @@ export default function EarningsTable({ earnings = [], onEarningsChange }) {
               </div>
 
               {/* Modal Actions */}
-              <div className="flex justify-between space-x-3 mt-6">
+              <div className="flex justify-end space-x-3 pt-4">
                 <button
                   type="button"
                   onClick={handleCloseEdit}

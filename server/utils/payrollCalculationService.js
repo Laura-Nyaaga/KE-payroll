@@ -3,8 +3,9 @@ const StatutoryService = require('./statutoryService');
 const { EmployeeDeduction } = require('../models/deductionsModel');
 const { EmployeeEarnings } = require('../models/earningsModel');
 const AdvancePay = require('../models/advanceModel');
-const { Deduction, Earnings} = require('../models');
+const { Deduction, Earnings } = require('../models');
 const { Op } = require('sequelize');
+const { personalRelief } = require('../config/statutoryRates');
 
 class PayrollCalculationService {
   constructor() {
@@ -12,43 +13,61 @@ class PayrollCalculationService {
   }
 
   async calculateEmployeePayroll(employee, payrollPeriod) {
-    if (!employee.basicSalary) {
-      throw new Error(`Employee ${employee.firstName} does not have a basic salary.`);
+    // Validate employee data
+    if (!employee || !employee.basicSalary) {
+      throw new Error(`Employee ${employee?.firstName || 'Unknown'} does not have a basic salary.`);
     }
 
-    const basicSalary = new Decimal(employee.basicSalary);
+    const basicSalary = new Decimal(employee.basicSalary || 0); // Fallback to 0 if undefined
 
-    const deductions = await this.calculateDeductions(employee.id, payrollPeriod);
+    const deductions = await this.calculateDeductions(employee.id, payrollPeriod) || [];
+    const totalDeductions = deductions.reduce((sum, d) => {
+      const amount = new Decimal(d.amount || 0); // Ensure amount is a valid number
+      return sum.plus(amount);
+    }, new Decimal(0));
 
-    const totalDeductions = deductions.reduce((sum, d) => sum.plus(new Decimal(d.amount)), new Decimal(0));
-
-    const earnings = await this.calculateEarnings(employee.id, payrollPeriod);
-
-    const totalEarnings = earnings.reduce((sum, e) => sum.plus(new Decimal(e.amount)), new Decimal(0));
+    const earnings = await this.calculateEarnings(employee.id, payrollPeriod) || [];
+    const totalEarnings = earnings.reduce((sum, e) => {
+      const amount = new Decimal(e.amount || 0); // Ensure amount is a valid number
+      return sum.plus(amount);
+    }, new Decimal(0));
 
     const grossPay = basicSalary.plus(totalEarnings);
 
-    const nssf = this.statutory.calculateNssf(grossPay);
-    const housingLevy = this.statutory.calculateHousingLevy(grossPay);
-    const shif = this.statutory.calculateShif(grossPay);
+    // Safely handle statutory calculations with fallbacks
+    const nssf = new Decimal(this.statutory.calculateNssf(grossPay) || 0);
+    const housingLevy = new Decimal(this.statutory.calculateHousingLevy(grossPay) || 0);
+    const shif = new Decimal(this.statutory.calculateShif(grossPay) || 0);
 
     const taxableIncome = grossPay.minus(nssf).minus(housingLevy).minus(shif);
+    // console.log(`Taxable Income for ${employee.firstName}:`, taxableIncome.toNumber());
 
-    const payeDetails = this.statutory.calculatePaye(taxableIncome, employee.personalRelief);
 
-    const totalStatutory = nssf.plus(housingLevy).plus(shif).plus(payeDetails.paye);
+    const personalRelief = 2400.00; // Fallback for personalRelief
+    // console.log(`Personal Relief for ${employee.firstName}:`, personalRelief);
+    const payeDetails = this.statutory.calculatePaye(taxableIncome, personalRelief) || { paye: new Decimal(0), relief: personalRelief };
+    // console.log(`Paye Details for ${employee.firstName}:`, payeDetails);
+    const paye = new Decimal(payeDetails.paye || 0);
+    // console.log(`PAYE for ${employee.firstName}:`, paye.toNumber());
+
+    const totalStatutory = nssf.plus(housingLevy).plus(shif).plus(paye);
+    const allDeductions = totalDeductions.plus(totalStatutory)
+
+
+    const grossTax = paye.plus(personalRelief);
+    // console.log(`Gross Tax for ${employee.firstName}:`, grossTax.toNumber());
 
     const netPaye = grossPay.minus(totalStatutory).minus(totalDeductions);
-    // console.log(`Net Paye for ${employee.firstName} ${employee.lastName}:`, netPaye.toNumber());
+    // console.log(`Net Paye for ${employee.firstName}:`, netPaye.toNumber());
 
     const statutory = {
-        nssf: Number(nssf.toFixed(2)),
-        housingLevy: Number(housingLevy.toFixed(2)),
-        shif: Number(shif.toFixed(2)),
-        paye: Number(payeDetails.paye.toFixed(2)),
-        total: Number(totalStatutory.toFixed(2))
-      };
-      
+      nssf: Number(nssf.toFixed(2)),
+      housingLevy: Number(housingLevy.toFixed(2)),
+      shif: Number(shif.toFixed(2)),
+      paye: Number(paye.toFixed(2)),
+      personalRelief: personalRelief.toFixed(2),
+      total: Number(totalStatutory.toFixed(2)),
+    };
 
     return {
       basicSalary: basicSalary.toNumber(),
@@ -60,12 +79,14 @@ class PayrollCalculationService {
       taxableIncome: taxableIncome.toNumber(),
       statutory,
       totalStatutory: totalStatutory.toNumber(),
+      allDeductions: allDeductions.toNumber(),
       netPaye: netPaye.toNumber(),
-      paye: payeDetails.paye.toNumber(),
-      personalRelief: payeDetails.relief.toNumber(),
+      paye: paye.toNumber(),
+      grossTax: grossTax.toNumber(),
+      personalRelief: personalRelief,
       paymentMethod: employee.methodOfPayment,
       paymentAmount: netPaye.toDecimalPlaces(2).toNumber(),
-      currency: employee.currency || 'KES'
+      currency: employee.currency || 'KES',
     };
   }
 
@@ -76,31 +97,31 @@ class PayrollCalculationService {
         status: 'active',
         effectiveDate: {
           [Op.gte]: payrollPeriod.start,
-          [Op.lte]: payrollPeriod.end
+          [Op.lte]: payrollPeriod.end,
         },
         [Op.or]: [
           { endDate: null },
           {
             endDate: {
               [Op.gte]: payrollPeriod.start,
-              [Op.lte]: payrollPeriod.end
-            }
-          }
-        ]
+              [Op.lte]: payrollPeriod.end,
+            },
+          },
+        ],
       },
       include: [{
         model: Deduction,
         as: 'deduction',
-        where: { status: 'active' }
-      }]
-    });
+        where: { status: 'active' },
+      }],
+    }) || [];
 
     return deductions.map(ed => ({
       itemType: 'deduction',
-      itemName: ed.deduction.deductionType,
+      itemName: ed.deduction?.deductionType || 'Unknown Deduction',
       amount: Number(ed.calculatedAmount) || 0,
-      isTaxable: ed.deduction.isTaxable,
-      status: ed.deduction.status
+      isTaxable: ed.deduction?.isTaxable || false,
+      status: ed.deduction?.status || 'inactive',
     }));
   }
 
@@ -111,39 +132,39 @@ class PayrollCalculationService {
         status: 'active',
         effectiveDate: {
           [Op.gte]: payrollPeriod.start,
-          [Op.lte]: payrollPeriod.end
+          [Op.lte]: payrollPeriod.end,
         },
         [Op.or]: [
           { endDate: null },
           {
             endDate: {
               [Op.gte]: payrollPeriod.start,
-              [Op.lte]: payrollPeriod.end
-            }
-          }
-        ]
+              [Op.lte]: payrollPeriod.end,
+            },
+          },
+        ],
       },
       include: [{
         model: Earnings,
         as: 'earnings',
-        where: { status: 'active' }
-      }]
-    });
+        where: { status: 'active' },
+      }],
+    }) || [];
 
     return earnings.map(ee => ({
       itemType: 'earnings',
-      itemName: ee.earnings.earningsType,
-      amount: Number(ee.calculatedAmount || 0),
-      isTaxable: ee.earnings.isTaxable,
-      status: ee.earnings.status
+      itemName: ee.earnings?.earningsType || 'Unknown Earnings',
+      amount: Number(ee.calculatedAmount) || 0,
+      isTaxable: ee.earnings?.isTaxable || false,
+      status: ee.earnings?.status || 'inactive',
     }));
   }
-
   async generateSummary(payrollData) {
     const summary = {
       totalEmployees: Object.keys(payrollData).length,
       totalBasic: 0,
       totalDeductions: 0,
+      allDeductions: 0,
       totalEarnings: 0,
       totalGross: 0,
       totalTaxable: 0,
@@ -152,8 +173,10 @@ class PayrollCalculationService {
         shif: 0,
         housingLevy: 0,
         paye: 0,
+        personalRelief: 0,
         total: 0
       },
+      totalGrossTax: 0,
       totalNet: 0
     };
 
@@ -161,6 +184,7 @@ class PayrollCalculationService {
       const data = payrollData[employeeId];
       summary.totalBasic += data.basicSalary;
       summary.totalDeductions += data.totalDeductions;
+      summary.allDeductions += data.allDeductions;
       summary.totalEarnings += data.totalEarnings;
       summary.totalGross += data.grossPay;
       summary.totalTaxable += data.taxableIncome;
@@ -168,7 +192,9 @@ class PayrollCalculationService {
       summary.totalStatutory.shif += data.statutory.shif;
       summary.totalStatutory.housingLevy += data.statutory.housingLevy;
       summary.totalStatutory.paye += data.statutory.paye;
+      summary.totalStatutory.personalRelief += data.statutory.personalRelief;
       summary.totalStatutory.total += data.statutory.total;
+      summary.totalGrossTax += data.grossTax;
       summary.totalNet += data.netPaye;
     }
 
@@ -180,6 +206,7 @@ class PayrollCalculationService {
       count: 0,
       totalBasic: 0,
       totalDeductions: 0,
+      allDeductions: 0,
       totalEarnings: 0,
       totalGross: 0,
       totalTaxable: 0,
@@ -188,8 +215,10 @@ class PayrollCalculationService {
         shif: 0,
         housingLevy: 0,
         paye: 0,
+        personalRelief: 0,
         total: 0
       },
+      totalGrossTax: 0,
       totalNet: 0
     };
   }
@@ -198,6 +227,7 @@ class PayrollCalculationService {
     group.count++;
     group.totalBasic += data.basicSalary;
     group.totalDeductions += data.totalDeductions;
+    group.allDeductions += data.allDeductions;
     group.totalEarnings += data.totalEarnings;
     group.totalGross += data.grossPay;
     group.totalTaxable += data.taxableIncome;
@@ -205,7 +235,9 @@ class PayrollCalculationService {
     group.totalStatutory.shif += data.statutory.shif;
     group.totalStatutory.housingLevy += data.statutory.housingLevy;
     group.totalStatutory.paye += data.statutory.paye;
+    group.totalStatutory.personalRelief += data.statutory.personalRelief;
     group.totalStatutory.total += data.statutory.total;
+    group.totalGrossTax += data.grossTax;
     group.totalNet += data.netPaye;
   }
 }
@@ -214,230 +246,5 @@ module.exports = new PayrollCalculationService();
 
 
 
-// const StatutoryService = require('./statutoryService');
-// const { EmployeeDeduction } = require('../models/deductionsModel');
-// const { EmployeeEarnings } = require('../models/earningsModel');
-// const AdvancePay = require('../models/advanceModel');
-// const { Deduction, Earnings, Employee } = require('../models');
-// const { Op } = require('sequelize');
-
-// class PayrollCalculationService {
-//     constructor() {
-//         this.statutory = StatutoryService;
-//     }
-
-//     async calculateEmployeePayroll(employee, payrollPeriod, companyCountryCode) {
-//         if (!employee.basicSalary) {
-//             throw new Error(`Employee ${employee.firstName} does not have a basic salary.`);
-//         }
-
-//         const basicSalary = employee.basicSalary;
-
-//         const deductions = await this.calculateDeductions(employee.id, payrollPeriod);
-//         console.log(`Deductions for ${employee.firstName}:`, deductions);
-
-//         const totalDeductions = deductions.reduce((sum, d) => sum + d.amount, 0);
-//         console.log(`Total Deductions for ${employee.firstName}:`, totalDeductions);
-
-
-//         const earnings = await this.calculateEarnings(employee.id, payrollPeriod);
-//         console.log(`Earnings for ${employee.firstName}:`, earnings);
-
-//         const totalEarnings = earnings.reduce((sum, e) => sum + e.amount, 0);
-//         console.log(`Total Earnings for ${employee.firstName}:`, totalEarnings);
-
-//         const grossPay = Number(basicSalary || 0) + Number(totalEarnings || 0);
-//         console.log(`Gross Pay for ${employee.firstName}:`, grossPay);
-
-//         const nssf = this.statutory.calculateNssf(grossPay);
-//         const housingLevy = this.statutory.calculateHousingLevy(grossPay);
-//         const shif = this.statutory.calculateShif(grossPay);
-
-//         const taxableIncome = grossPay - (nssf + housingLevy + shif);
-//         console.log(`Taxable Income for ${employee.firstName}:`, taxableIncome);
-
-//         const payeDetails = this.statutory.calculatePaye(taxableIncome, employee.personalRelief);
-
-//         const totalStatutory = nssf + housingLevy + shif + payeDetails.paye;
-//         console.log(`Total Satutory Deductions for ${employee.firstName}:`, totalStatutory);
-
-//         const statutory = {
-//             nssf: parseFloat(nssf.toFixed(2)),
-//             housingLevy: parseFloat(housingLevy.toFixed(2)),
-//             shif: parseFloat(shif.toFixed(2)),
-//             paye: parseFloat(payeDetails.paye.toFixed(2)),
-//             // relief: parseFloat(payeDetails.relief.toFixed(2)),
-//             total: parseFloat(totalStatutory.toFixed(2))
-//         };
-        
-
-//         const netPaye = parseFloat(grossPay.toFixed(2) - totalStatutory.toFixed(2) - totalDeductions.toFixed(2));
-//         console.log(`Net Paye for ${employee.firstName}:`, netPaye);
-
-
-//         return {
-//             basicSalary,
-//             deductions,
-//             totalDeductions,
-//             earnings,
-//             totalEarnings,
-//             grossPay,
-//             taxableIncome,
-//             statutory,
-//             totalStatutory,
-//             netPaye,
-//             paye: parseFloat(payeDetails.paye.toFixed(2)),
-//             personalRelief: parseFloat(payeDetails.relief.toFixed(2)),
-//             paymentMethod: employee.methodOfPayment,
-//             paymentAmount: parseFloat(netPaye.toFixed(2)),
-//             currency: employee.currency || 'KES'
-//         };
-//     }
-
-//     async calculateDeductions(employeeId, payrollPeriod) {
-//         const deductions = await EmployeeDeduction.findAll({
-//             where: {
-//                 employeeId: employeeId,
-//                 status: 'active', // Ensures EmployeeDeduction is active
-//                 effectiveDate: { 
-//                     [Op.gte]: payrollPeriod.start, // Must be on or after payroll start date
-//                     [Op.lte]: payrollPeriod.end    // Must be on or before payroll end date
-//                 },
-//                 [Op.or]: [
-//                     { endDate: null }, // If endDate is null, the deduction is still valid
-//                     { 
-//                         endDate: { 
-//                             [Op.gte]: payrollPeriod.start, // Must be on or after payroll start date
-//                             [Op.lte]: payrollPeriod.end    // Must be on or before payroll end date
-//                         }
-//                     }
-//                 ]
-//             },
-//             include: [{
-//                 model: Deduction, 
-//                 as: 'deduction',
-//                 where: { status: 'active' } // Ensures Deduction itself is active
-//             }]
-//         });
-    
-//         return deductions.map(ed => ({
-//             itemType: 'deduction',
-//             itemName: ed.deduction.deductionType,
-//             amount: Number(ed.calculatedAmount) || 0,
-//             isTaxable: ed.deduction.isTaxable,
-//             status: ed.deduction.status
-//         }));
-//     }
-    
-
-//     async calculateEarnings(employeeId, payrollPeriod) {
-//         const earnings = await EmployeeEarnings.findAll({
-//             where: {
-//                 employeeId: employeeId,
-//                 status: 'active', // Ensures EmployeeEarnings is active
-//                 effectiveDate: { 
-//                     [Op.gte]: payrollPeriod.start, // Must be on or after payroll start date
-//                     [Op.lte]: payrollPeriod.end 
-//                 },
-//                 [Op.or]: [
-//                     { endDate: null },
-//                     { 
-//                         endDate: { 
-//                         [Op.gte]: payrollPeriod.start,
-//                         [Op.lte]: payrollPeriod.end    // Must be on or before payroll end date
-//                         } 
-//                     }
-//                 ]
-//             },
-//             include: [{ 
-//                 model: Earnings, as: 'earnings',
-//                 where: { status: 'active' }
-//             }]
-//         });
-//         return earnings.map(ee => ({
-//             itemType: 'earnings',
-//             itemName: ee.earnings.earningsType,
-//             amount: Number(ee.calculatedAmount || 0),
-//             isTaxable: ee.earnings.isTaxable,
-//             status: ee.earnings.status
-//         }));
-//     }
-
-//     async generateSummary(payrollData) {
-//         const summary = {
-//             totalEmployees: Object.keys(payrollData).length,
-//             totalBasic: 0,
-//             totalDeductions: 0,
-//             totalEarnings: 0,
-//             totalGross: 0,
-//             totalTaxable: 0,
-//             totalStatutory: {
-//                 nssf: 0,
-//                 shif: 0,
-//                 housingLevy: 0,
-//                 paye: 0,
-//                 total: 0
-//             },
-//             totalNet: 0,
-//             byDepartment: {},
-//             byJobTitle: {}
-//         };
-
-//         for (const employeeId in payrollData) {
-//             const data = payrollData[employeeId];
-//             summary.totalBasic += data.basicSalary;
-//             summary.totalDeductions += data.totalDeductions;
-//             summary.totalEarnings += data.earnings.reduce((sum, e) => sum + e.amount, 0);
-//             summary.totalGross += data.grossPay;
-//             summary.totalTaxable += data.taxableIncome;
-//             summary.totalStatutory.nssf += data.statutory.nssf;
-//             summary.totalStatutory.shif += data.statutory.shif;
-//             summary.totalStatutory.housingLevy += data.statutory.housingLevy;
-//             summary.totalStatutory.paye += data.statutory.paye;
-//             summary.totalStatutory.total += data.statutory.nssf + data.statutory.shif +
-//                                             data.statutory.housingLevy + data.statutory.paye;
-//             summary.totalNet += data.netPaye;
-//         }
-
-//         return summary;
-//     }
-
-//     createEmptySummaryGroup() {
-//         return {
-//             count: 0,
-//             totalBasic: 0,
-//             totalDeductions: 0,
-//             totalEarnings: 0,
-//             totalGross: 0,
-//             totalTaxable: 0,
-//             totalStatutory: {
-//                 nssf: 0,
-//                 shif: 0,
-//                 housingLevy: 0,
-//                 paye: 0,
-//                 total: 0
-//             },
-//             totalNet: 0
-//         };
-//     }
-
-//     addToSummaryGroup(group, data) {
-//         group.count++;
-//         group.totalBasic += data.basicSalary;
-//         group.totalDeductions += data.totalDeductions;
-//         group.totalEarnings += data.earnings.reduce((sum, e) => sum + e.amount, 0);
-//         group.totalGross += data.grossPay;
-//         group.totalTaxable += data.taxableIncome;
-//         group.totalStatutory.nssf += data.statutory.nssf;
-//         group.totalStatutory.shif += data.statutory.shif;
-//         group.totalStatutory.housingLevy += data.statutory.housingLevy;
-//         group.totalStatutory.paye += data.statutory.paye;
-//         group.totalStatutory.total += data.statutory.nssf + data.statutory.shif +
-//                                      data.statutory.housingLevy + data.statutory.paye;
-//         group.totalNet += data.netPaye;
-//     }
-// }
-
-// module.exports = new PayrollCalculationService();
 
 

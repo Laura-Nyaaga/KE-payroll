@@ -164,7 +164,7 @@ export default function ProjectsPage() {
         <h2 className="text-2xl font-semibold text-gray-700">Projects Management</h2>
         <div className="flex items-center gap-4">
           {/* Export Projects Button */}
-          <button
+          {/* <button
             className="flex items-center text-blue-600 hover:text-blue-800 transition-colors duration-200 p-2 rounded-md hover:bg-blue-100"
             onClick={handleExportData}
             disabled={isLoading || projects.length === 0} // Disable if loading or no projects to export
@@ -176,7 +176,7 @@ export default function ProjectsPage() {
               <line x1="12" y1="15" x2="12" y2="3"></line>
             </svg>
             <span className="ml-2 font-medium">Export</span>
-          </button>
+          </button> */}
 
           {/* Add Project Button */}
           <button

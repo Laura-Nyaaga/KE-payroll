@@ -1,39 +1,82 @@
+const { Op } = require("sequelize");
+
 const { User, Company } = require("../models");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+const { sendResetEmail } = require("../utils/emailService");
 
-// Your existing login function (unchanged)
+const MAX_LOGIN_ATTEMPTS = 3;
+const LOCK_TIME = 15 * 60 * 1000; // 15 minutes in milliseconds
+
 exports.login = async (req, res) => {
-    try {
-      const { email, password } = req.body;
-      
-      if (!email || !password)
-        return res.status(400).json({ message: "Email and password are required" });
-  
-      // First: Try to find a User with that email
-      const user = await User.findOne({ where: { email, deletedAt: null } });
-  
-      if (user) {
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch)
-          return res.status(401).json({ message: "Invalid credentials" });
-  
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
+
+    let userFound = false; // Flag to indicate if a user or company record was found by email
+
+    // --- Helper function to check lockout status ---
+    const isLocked = (record) => {
+      return record.lockUntil && record.lockUntil > new Date();
+    };
+
+    // --- Helper function to handle failed login attempts ---
+    const handleFailedLogin = async (record, recordType) => {
+      record.failedLoginAttempts += 1;
+      if (record.failedLoginAttempts >= MAX_LOGIN_ATTEMPTS) {
+        record.lockUntil = new Date(Date.now() + LOCK_TIME);
+        record.failedLoginAttempts = 0; // Reset attempts after locking
+        await record.save();
+        return res.status(403).json({
+          message: `Too many failed login attempts. Your ${recordType} account is locked for ${LOCK_TIME / 60000} minutes.`,
+        });
+      }
+      await record.save();
+      return res.status(401).json({
+        message: `Invalid credentials. You have ${MAX_LOGIN_ATTEMPTS - record.failedLoginAttempts} attempts remaining.`,
+      });
+    };
+
+    // --- Attempt 1: Find a User (regular user or SuperAdmin linked to user) ---
+    const user = await User.findOne({ where: { email, deletedAt: null } });
+
+    if (user) {
+      userFound = true;
+      if (isLocked(user)) {
+        return res.status(403).json({
+          message: `Your account is locked due to too many failed attempts. Please try again after ${Math.ceil((user.lockUntil - new Date()) / 60000)} minutes.`,
+        });
+      }
+
+      const isMatch = await bcrypt.compare(password, user.password);
+
+      if (isMatch) {
+        // Successful login: Reset failed attempts
+        user.failedLoginAttempts = 0;
+        user.lockUntil = null; // Clear lock
+        await user.save();
+
         let tokenPayload = {
           userId: user.id,
           email: user.email,
           role: user.role,
         };
-  
+
         // Check if user is a SuperAdmin, and enrich payload with company info
         if (user.role === "SuperAdmin" && user.companyId) {
           const company = await Company.findOne({
             where: { id: user.companyId, deletedAt: null },
             attributes: ["id", "name", "industryCategory", "email"],
           });
-  
-          if (!company)
+
+          if (!company) {
             return res.status(403).json({ message: "Company not found for SuperAdmin" });
-  
+          }
+
           tokenPayload = {
             ...tokenPayload,
             companyId: company.id,
@@ -41,29 +84,20 @@ exports.login = async (req, res) => {
             email: company.email, // Use company email for SuperAdmin
             isSuperUser: true,
           };
-  
-          // res.cookie("token", jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "8h" }), {
-          //   httpOnly: true,
-          //   sameSite: "lax",
-          //   maxAge: 8 * 60 * 60 * 1000,
-          // });
+        }
 
+        const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "8h" });
 
-      const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "8h" });
+        res.cookie("token", token, {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === 'production', // Set to true in production
+          maxAge: 8 * 60 * 60 * 1000,
+        });
 
-      // *** CRITICAL CHANGE HERE ***
-      res.cookie("token", token, {
-        httpOnly: true,
-        // For development, use "lax" if your frontend and backend are on different domains/IPs
-        // (e.g., localhost:3000 vs 192.168.100.84:4000)
-        sameSite: "lax",
-        // Only set `secure: true` if your frontend and backend are both running over HTTPS.
-        // Since you are using http://localhost:3000, keep this false for development.
-        // In production, when using HTTPS, set this to true.
-        secure: false, // <-- Set to false for HTTP development environments
-        maxAge: 8 * 60 * 60 * 1000,
-      });
-  
+        // Response for SuperAdmin
+        if (user.role === "SuperAdmin") {
+          const company = await Company.findOne({ where: { id: user.companyId } }); // Re-fetch company for response
           return res.status(200).json({
             message: "SuperAdmin login successful",
             company: {
@@ -79,17 +113,8 @@ exports.login = async (req, res) => {
             },
           });
         }
-  
-        // Regular user login
-        const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "8h" });
-  
-        res.cookie("token", token, {
-          httpOnly: true,
-          sameSite: "lax",
-          maxAge: 8 * 60 * 60 * 1000,
-          secure: false, // Set to true in production with HTTPS
-        });
-  
+
+        // Response for regular user
         return res.status(200).json({
           message: "Login successful",
           user: {
@@ -98,70 +123,93 @@ exports.login = async (req, res) => {
             role: user.role,
           },
         });
+      } else {
+        // User password mismatch
+        return handleFailedLogin(user, 'user');
       }
-  
-      // If no user found, fallback to company login for edge cases
-      const company = await Company.findOne({
-        where: { email, deletedAt: null },
-        attributes: ["id", "name", "email", "password", "industryCategory"],
-      });
-  
-      if (!company || !company.password)
-        return res.status(401).json({ message: "Invalid credentials" });
-  
-      const isCompanyPasswordMatch = await bcrypt.compare(password, company.password);
-      if (!isCompanyPasswordMatch)
-        return res.status(401).json({ message: "Invalid credentials" });
-  
-      // Try to find SuperAdmin user linked to this company
-      const superAdmin = await User.findOne({
-        where: {
-          companyId: company.id,
-          email: company.email,
-          role: "SuperAdmin",
-          deletedAt: null,
-        },
-      });
-  
-      if (!superAdmin)
-        return res.status(403).json({ message: "No SuperAdmin user found for this company" });
-  
-      const tokenPayload = {
-        companyId: company.id,
-        userId: superAdmin.id,
-        email: company.email,
-        role: superAdmin.role,
-        isSuperUser: true,
-      };
-  
-      const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "8h" });
-  
-      res.cookie("token", token, {
-        httpOnly: true,
-        sameSite: "lax",
-        maxAge: 8 * 60 * 60 * 1000,
-        secure: false, // Set to true in production with HTTPS
-      });
-  
-      return res.status(200).json({
-        message: "Login successful",
-        company: {
-          id: company.id,
-          name: company.name,
-          industry: company.industryCategory,
-        },
-        user: {
-          id: superAdmin.id,
-          firstName: superAdmin.firstName,
-          lastName: superAdmin.lastName,
-          role: superAdmin.role,
-        },
-      });
-  
-    } catch (error) {
-      console.error("Login error:", error);
-      return res.status(500).json({ message: "Failed to process login", error: error.message });
     }
+
+    // --- Attempt 2: If no User found, try to find a Company with that email (for Company SuperAdmin fallback) ---
+    const company = await Company.findOne({
+      where: { email, deletedAt: null },
+      attributes: ["id", "name", "email", "password", "industryCategory", "failedLoginAttempts", "lockUntil"],
+    });
+
+    if (company) {
+      userFound = true;
+      if (isLocked(company)) {
+        return res.status(403).json({
+          message: `This company account is locked due to too many failed attempts. Please try again after ${Math.ceil((company.lockUntil - new Date()) / 60000)} minutes.`,
+        });
+      }
+
+      const isCompanyPasswordMatch = await bcrypt.compare(password, company.password);
+
+      if (isCompanyPasswordMatch) {
+        // Successful login: Reset failed attempts for the company
+        company.failedLoginAttempts = 0;
+        company.lockUntil = null; // Clear lock
+        await company.save();
+
+        // Try to find SuperAdmin user linked to this company
+        const superAdmin = await User.findOne({
+          where: {
+            companyId: company.id,
+            email: company.email,
+            role: "SuperAdmin",
+            deletedAt: null,
+          },
+        });
+
+        if (!superAdmin) {
+          // This scenario indicates a data inconsistency, company exists but no linked SuperAdmin
+          return res.status(403).json({ message: "No SuperAdmin user found for this company" });
+        }
+
+        const tokenPayload = {
+          companyId: company.id,
+          userId: superAdmin.id,
+          email: company.email,
+          role: superAdmin.role,
+          isSuperUser: true,
+        };
+
+        const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "8h" });
+
+        res.cookie("token", token, {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === 'production', // Set to true in production
+          maxAge: 8 * 60 * 60 * 1000,
+        });
+
+        return res.status(200).json({
+          message: "Login successful",
+          company: {
+            id: company.id,
+            name: company.name,
+            industry: company.industryCategory,
+          },
+          user: {
+            id: superAdmin.id,
+            firstName: superAdmin.firstName,
+            lastName: superAdmin.lastName,
+            role: superAdmin.role,
+          },
+        });
+      } else {
+        // Company password mismatch
+        return handleFailedLogin(company, 'company');
+      }
+    }
+    if (!userFound) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+  } catch (error) {
+    console.error("Login error:", error);
+    return res.status(500).json({ message: "Failed to process login", error: error.message });
+  }
 };
 
 exports.verify = async (req, res) => {
@@ -209,6 +257,7 @@ exports.verify = async (req, res) => {
                 where: { id: effectiveCompanyId, deletedAt: null },
                 attributes: ["id", "name", "industryCategory", "email"],
             });
+
         }
 
         // Construct user and company objects to send to frontend
@@ -333,48 +382,70 @@ exports.logout = (req, res) => {
 };
 
 
-
 exports.resetPassword = async (req, res) => {
+  const { token, newPassword, confirmPassword } = req.body;
+
+  if (!token || !newPassword || !confirmPassword) {
+    return res.status(400).json({ message: "Token, new password, and confirm password are required." });
+  }
+
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({ message: "Passwords do not match." });
+  }
+
   try {
-    const { email, newPassword, confirmPassword } = req.body;
+    const now = Date.now();
 
-    if (!email || !newPassword || !confirmPassword) {
-      return res.status(400).json({ message: "Email, new password, and confirm password are required." });
-    }
+    let account = await User.findOne({
+      where: { resetToken: token, resetTokenExpiry: { [Op.gt]: now }, deletedAt: null },
+    }) || await Company.findOne({
+      where: { resetToken: token, resetTokenExpiry: { [Op.gt]: now }, deletedAt: null },
+    });
 
-    if (newPassword !== confirmPassword) {
-      return res.status(400).json({ message: "Passwords do not match." });
-    }
-
-    let accountType = null;
-    let account = null;
-
-    account = await User.findOne({ where: { email, deletedAt: null } });
-    if (account) accountType = "user";
-
-    if (!account) {
-      account = await Company.findOne({ where: { email, deletedAt: null } });
-      if (account) accountType = "company";
-    }
-
-    if (!account) {
-      return res.status(404).json({ message: "No user or company found with this email." });
-    }
+    if (!account) return res.status(400).json({ message: 'Invalid or expired token.' });
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-    await account.update({ password: hashedPassword });
-
-    return res.status(200).json({
-      success: true,
-      message: `Password reset successful for ${accountType}.`,
+    await account.update({
+      password: hashedPassword,
+      resetToken: null,
+      resetTokenExpiry: null,
     });
 
-  } catch (error) {
-    console.error("Password reset error:", error);
-    return res.status(500).json({ message: "Failed to reset password.", error: error.message });
+    return res.status(200).json({ success: true, message: 'Password reset successful.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error.' });
   }
 };
 
 
+
+exports.sendResetPasswordEmail = async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) return res.status(400).json({ message: 'Email is required.' });
+
+  try {
+    let account = await User.findOne({ where: { email, deletedAt: null } }) || 
+                  await Company.findOne({ where: { email, deletedAt: null } });
+
+    if (!account) return res.status(404).json({ message: 'Account not found.' });
+
+    const token = crypto.randomBytes(32).toString('hex');
+const resetUrl = `https://mobilitysolutionske.com/auth/reset-password?token=${token}`;
+
+    // Store token and expiry on the user (you can create a PasswordReset model too)
+    account.resetToken = token;
+    account.resetTokenExpiry = Date.now() + 3600000; // 1 hour
+    await account.save();
+
+    await sendResetEmail(account, resetUrl); // Implement this
+
+    return res.status(200).json({ message: 'Password reset email sent.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to send reset email.' });
+  }
+};

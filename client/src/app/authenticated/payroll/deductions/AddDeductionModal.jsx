@@ -8,7 +8,6 @@ export default function AddDeductionModal({ onClose, onAdd }) {
     calculationMethod: 'fixed_amount',
     mode: 'monthly',
     isTaxable: true,
-    startDate: new Date().toISOString().split('T')[0],
     status: 'active'
   });
   
@@ -53,11 +52,7 @@ export default function AddDeductionModal({ onClose, onAdd }) {
     } else if (deductionData.deductionType.length < 2 || deductionData.deductionType.length > 100) {
       newErrors.deductionType = 'Deduction type must be between 2-100 characters';
     }
-    
-    if (!deductionData.startDate) {
-      newErrors.startDate = 'Start date is required';
-    }
-    
+        
     // Enforce percentage validation rule
     if (deductionData.calculationMethod === 'percentage' && deductionData.mode !== 'monthly') {
       newErrors.mode = 'Percentage-based deductions must have "monthly" mode';
@@ -100,7 +95,7 @@ export default function AddDeductionModal({ onClose, onAdd }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 max-w-md w-full">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold">Add Deduction</h2>
@@ -129,9 +124,22 @@ export default function AddDeductionModal({ onClose, onAdd }) {
               type="text"
               name="deductionType"
               value={deductionData.deductionType}
-              onChange={handleChange}
-              className={`mt-1 block w-full px-3 py-2 border ${errors.deductionType ? 'border-red-300' : 'border-gray-300'} rounded-md shadow-sm focus:outline-none focus:ring-cyan-500 focus:border-cyan-500`}
-              placeholder="Enter deduction type"
+              onChange={(e) => {
+                const inputValue = e.target.value;
+                const titleCaseValue = inputValue
+                  .toLowerCase()
+                  .replace(/(^|\s)\w/g, (letter) => letter.toUpperCase());
+                handleChange({
+                  target: { name: "deductionType", value: titleCaseValue },
+                });
+              }}
+              className={`w-full p-2 border rounded-md ${
+                errors.name ? "border-red-500" : "border-gray-300"
+              }`}
+              aria-label="Deduction Type"
+              required
+              minLength={2}
+              maxLength={100}
             />
             {errors.deductionType && (
               <p className="mt-1 text-sm text-red-600">{errors.deductionType}</p>
@@ -192,21 +200,6 @@ export default function AddDeductionModal({ onClose, onAdd }) {
             </label>
           </div>
           
-          {/* Start Date */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Start Date *</label>
-            <input
-              type="date"
-              name="startDate"
-              value={deductionData.startDate}
-              onChange={handleChange}
-              className={`mt-1 block w-full px-3 py-2 border ${errors.startDate ? 'border-red-300' : 'border-gray-300'} rounded-md shadow-sm focus:outline-none focus:ring-cyan-500 focus:border-cyan-500`}
-            />
-            {errors.startDate && (
-              <p className="mt-1 text-sm text-red-600">{errors.startDate}</p>
-            )}
-          </div>
-          
           {/* Status (hidden field since it defaults to active) */}
           <input type="hidden" name="status" value="active" />
           
@@ -222,7 +215,7 @@ export default function AddDeductionModal({ onClose, onAdd }) {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-cyan-500 text-white rounded-md hover:bg-cyan-600 disabled:bg-cyan-300"
+              className="px-4 py-2 bg-cyan-400 text-white rounded-md hover:bg-cyan-600 disabled:bg-cyan-300"
               disabled={isSubmitting}
             >
               {isSubmitting ? 'Adding...' : 'Add Deduction'}

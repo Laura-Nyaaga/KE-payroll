@@ -1,105 +1,121 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import toast from "react-hot-toast";
-import api, { BASE_URL } from "@/app/config/api"; // Updated import: Assuming 'api' is your configured axios instance with 'withCredentials: true'
+import { useRouter } from "next/navigation";
+import api, { BASE_URL } from "@/app/config/api";
+import isEqual from "lodash/isEqual";
 
 const PayrollContext = createContext();
 
 export const PayrollProvider = ({ children }) => {
-  // State initialization
+  const router = useRouter();
+  const initialCompanyId =
+    typeof window !== "undefined" ? localStorage.getItem("companyId") : null;
+  const initialUserData =
+    typeof window !== "undefined" ? localStorage.getItem("user") : null;
+
+  const [companyId, setCompanyId] = useState(initialCompanyId);
+  const [currentUserId, setCurrentUserId] = useState(
+    initialUserData ? JSON.parse(initialUserData).id : null
+  );
+  const [currentUserRole, setCurrentUserRole] = useState(
+    initialUserData ? JSON.parse(initialUserData).role : null
+  );
+
   const [selectedStatus, setSelectedStatus] = useState("draft");
   const [payrollDataRaw, setPayrollDataRaw] = useState([]);
-  const [filteredPayrollData, setFilteredPayrollData] = useState([]);
   const [visibleColumns, setVisibleColumns] = useState({});
   const [earningsTypes, setEarningsTypes] = useState([]);
   const [deductionsTypes, setDeductionsTypes] = useState([]);
   const [payrollDates, setPayrollDates] = useState({
     from: null,
     to: null,
-    totalDays: 0
+    totalDays: 0,
   });
   const [paymentDate, setPaymentDate] = useState(null);
   const [selectedEmployees, setSelectedEmployees] = useState(new Set());
   const [approverId, setApproverId] = useState(null);
   const [processedBy, setProcessedBy] = useState("");
+  const [rejectedBy, setRejectedBy] = useState("");
   const [payrollId, setPayrollId] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
   const [filters, setFilters] = useState({
     departments: [],
     jobTitles: [],
     projects: [],
     modes: [],
-    employmentTypes: []
+    employmentTypes: [],
   });
   const [noDataMessage, setNoDataMessage] = useState("");
   const [isPreviewGenerated, setIsPreviewGenerated] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [queryError, setQueryError] = useState(null);
 
-  // New states for current user details
-  const [currentUserId, setCurrentUserId] = useState(null);
-  const [currentUserRole, setCurrentUserRole] = useState(null);
-  // Derived state for approval permission (Memoized for performance)
-  const canApprovePayroll = useCallback(() => {
-    return ['SuperAdmin', 'HR', 'Accountant'].includes(currentUserRole);
-  }, [currentUserRole]);
+  
 
+  const isFetchingRef = useRef(false);
 
-  // Fetch current user details from local storage on mount
-  useEffect(() => {
-    try {
-      const storedUserData = localStorage.getItem('user'); // Assuming user data is stored here as 'user'
-      if (storedUserData) {
-        const user = JSON.parse(storedUserData);
-        setCurrentUserId(user.id); // Assuming user.id holds the userId
-        setCurrentUserRole(user.role); // Assuming user.role holds the user's role
-      }
-    } catch (e) {
-      console.error("Failed to parse user data from local storage:", e);
-      setCurrentUserId(null);
-      setCurrentUserRole(null);
-    }
-  }, []); // Run once on component mount
+  const canApprovePayroll = useMemo(
+    () => ["SuperAdmin", "HR", "Accountant"].includes(currentUserRole),
+    [currentUserRole]
+  );
+  const canRejectPayroll = useMemo(() => canApprovePayroll, [canApprovePayroll]);
 
-  const transformPayrollData = useCallback((data) => {
-    return data.map(emp => ({
-      ...emp,
-      earnings: emp.earnings || [],
-      deductions: emp.deductions || [],
-      statutory: emp.statutory || {
-        nssf: 0,
-        shif: 0,
-        housingLevy: 0,
-        paye: 0,
-        total: 0
-      },
-      status: emp.status || selectedStatus,
-      // Ensure IDs are strings for consistent comparison with filter arrays
-      departmentId: emp.departmentId?.toString(),
-      jobTitleId: emp.jobTitleId?.toString(),
-      projectId: emp.projectId?.toString(),
-      paymentMethod: emp.paymentMethod,
-      employmentType: emp.employmentType
-    }));
-  }, [selectedStatus]);
+  const transformPayrollData = useCallback(
+    (data) =>
+      Array.isArray(data)
+        ? data.map((emp) => ({
+            ...emp,
+            earnings: emp.earnings || [],
+            deductions: emp.deductions || [],
+            statutory: emp.statutory || {
+              nssf: 0,
+              shif: 0,
+              housingLevy: 0,
+              paye: 0,
+              total: 0,
+            },
+            status: emp.status || selectedStatus,
+            departmentId: emp.departmentId?.toString(),
+            jobTitleId: emp.jobTitleId?.toString(),
+            projectId: emp.projectId?.toString(),
+            paymentMethod: emp.paymentMethod,
+            employmentType: emp.employmentType,
+            rejectionReason: emp.rejectionReason || null,
+          }))
+        : [],
+    [selectedStatus]
+  );
 
   const updateEarningsAndDeductions = useCallback((data) => {
-    const earnings = new Set();
-    const deductions = new Set();
+    const earningsSet = new Set();
+    const deductionsSet = new Set();
 
-    data.forEach(emp => {
-      // Use optional chaining and nullish coalescing to safely access properties
-      emp.earnings?.forEach(e => earnings.add(e.name || e.type || ''));
-      emp.deductions?.forEach(d => deductions.add(d.name || d.type || ''));
+    data.forEach((emp) => {
+      emp.earnings?.forEach((e) =>
+        earningsSet.add(e.name || e.type || "")
+      );
+      emp.deductions?.forEach((d) =>
+        deductionsSet.add(d.name || d.type || "")
+      );
     });
 
-    const earningsArr = Array.from(earnings);
-    const deductionsArr = Array.from(deductions);
+    const earningsArr = Array.from(earningsSet).sort();
+    const deductionsArr = Array.from(deductionsSet).sort();
 
-    setEarningsTypes(earningsArr);
-    setDeductionsTypes(deductionsArr);
+    setEarningsTypes((prev) => (isEqual(prev, earningsArr) ? prev : earningsArr));
+    setDeductionsTypes((prev) => (isEqual(prev, deductionsArr) ? prev : deductionsArr));
 
-    const columns = {
+    const newColumns = {
       staffId: true,
       fullName: true,
       basicSalary: true,
@@ -113,259 +129,221 @@ export const PayrollProvider = ({ children }) => {
       totalStatutory: true,
       netPay: true,
       status: true,
+      paymentMethod: true,
+      ...Object.fromEntries(earningsArr.map((type) => [`earning_${type}`, true])),
+      ...Object.fromEntries(deductionsArr.map((type) => [`deduction_${type}`, true])),
     };
 
-    earningsArr.forEach(type => columns[`earning_${type}`] = true);
-    deductionsArr.forEach(type => columns[`deduction_${type}`] = true);
-    setVisibleColumns(columns);
+    setVisibleColumns((prev) => (isEqual(prev, newColumns) ? prev : newColumns));
   }, []);
 
-  const fetchReadOnlyStatus = useCallback(async (status, specificPayrollId = null) => {
-    setLoading(true);
-    setError(null);
-    const companyId = localStorage.getItem('companyId');
+  const fetchPayrollStatus = useCallback(async () => {
+    if (!companyId || payrollId === null || selectedStatus === null) return;
+    if (isFetchingRef.current) return;
 
-    if (!companyId) {
-      setLoading(false);
-      setError("Company ID not found in local storage. Cannot fetch payroll data.");
-      setNoDataMessage("Company ID not found. Please log in.");
-      return;
-    }
+    isFetchingRef.current = true;
+    setIsLoading(true);
+    setQueryError(null);
+    setNoDataMessage("");
 
     try {
-      const payrollIdToUse = specificPayrollId || payrollId;
-      const response = await api.get( // Use 'api' instance
-        `${BASE_URL}/payrolls/status/${companyId}/${payrollIdToUse}/${status}` // Dynamic companyId
+      const res = await api.get(
+        `${BASE_URL}/payrolls/status/${companyId}/${payrollId}/${selectedStatus}`
       );
 
-      if (response.data?.success) {
-        const transformedData = transformPayrollData(response.data.data);
-        setPayrollDataRaw(transformedData);
-        updateEarningsAndDeductions(transformedData);
-        setPayrollId(response.data.payrollId || payrollId);
-        setNoDataMessage("");
+      if (res.data?.success && Array.isArray(res.data.data)) {
+        const transformed = transformPayrollData(res.data.data);
+
+        setPayrollDataRaw((prev) => (isEqual(prev, transformed) ? prev : transformed));
+        updateEarningsAndDeductions(transformed);
+        setRejectionReason(res.data.metadata?.rejectionReason || "");
+        setIsPreviewGenerated(true);
+      } else {
+        setNoDataMessage(res.data?.message || "No data available.");
+        setPayrollDataRaw([]);
+        setIsPreviewGenerated(false);
+      }
+    } catch (err) {
+      setQueryError(err);
+      setNoDataMessage(err.message || "Failed to fetch data.");
+      setPayrollDataRaw([]);
+      setIsPreviewGenerated(false);
+    } finally {
+      isFetchingRef.current = false;
+      setIsLoading(false);
+    }
+  }, [companyId, payrollId, selectedStatus, transformPayrollData, updateEarningsAndDeductions]);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (companyId && payrollId !== null && selectedStatus !== null) {
+        fetchPayrollStatus();
       } else {
         setPayrollDataRaw([]);
-        updateEarningsAndDeductions([]);
-        setNoDataMessage(`No payroll Data exists in ${status}`);
+        setNoDataMessage("Select payroll ID and status to view data.");
       }
-    } catch (err) {
-      console.error("Fetch error:", err);
-      setPayrollDataRaw([]);
-      updateEarningsAndDeductions([]);
-      setError(err.response?.data?.message || err.message || `Failed to load ${status} payroll.`); // Use setError
-      setNoDataMessage(`Failed to load ${status} payroll. ${err.response?.data?.message || err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [payrollId, transformPayrollData, updateEarningsAndDeductions]);
+    }, 100);
+    return () => clearTimeout(timeout);
+  }, [companyId, selectedStatus, fetchPayrollStatus]);
 
-  // Initial fetch on component mount and when selectedStatus changes
-  useEffect(() => {
-    fetchReadOnlyStatus(selectedStatus); // Pass selectedStatus to fetch function
-  }, [selectedStatus, fetchReadOnlyStatus]);
-
-  const generatePreview = useCallback(async (dates) => {
-    if (!dates?.payPeriodStartDate || !dates?.payPeriodEndDate || !dates?.paymentDate) {
-      toast.error("Please select all date fields");
-      throw new Error("Missing date fields");
-    }
-
-    setLoading(true);
-    setError(null);
-    const companyId = localStorage.getItem('companyId');
-
-    if (!companyId) {
-      setLoading(false);
-      setError("Company ID not found in local storage. Cannot generate preview.");
-      toast.error("Company ID not found. Please log in.");
-      throw new Error("Company ID missing");
-    }
-
-    try {
-      // Ensure dates are Date objects or convert them
-      const startDate = new Date(dates.payPeriodStartDate);
-      const endDate = new Date(dates.payPeriodEndDate);
-      const paymentDate = new Date(dates.paymentDate);
-
-      const payload = {
-        payPeriodStartDate: startDate.toISOString().split('T')[0],
-        payPeriodEndDate: endDate.toISOString().split('T')[0],
-        paymentDate: paymentDate.toISOString().split('T')[0],
-      };
-
-      console.log("API Payload:", payload);
-
-      const response = await api.post( // Use 'api' instance
-        `${BASE_URL}/payrolls/initiate/company/${companyId}`, // Dynamic companyId
-        payload
-      );
-
-      if (response.data?.success) {
-        const transformedData = transformPayrollData(response.data.data);
-        setPayrollDataRaw(transformedData);
-        updateEarningsAndDeductions(transformedData);
-        setPayrollId(response.data.payrollId || null); // Ensure payrollId is correctly set
-        toast.success("Draft payroll generated");
-        setIsPreviewGenerated(true);
-        setNoDataMessage("");
-        return response.data;
-      }
-      throw new Error(response.data?.message || "Failed to generate preview");
-    } catch (err) {
-      console.error("Generate preview error:", err);
-      if (err.response) {
-        console.error("Response data:", err.response.data);
-        console.error("Response status:", err.response.status);
-      }
-      const errorMessage = err.response?.data?.message || err.message || "Failed to generate preview";
-      toast.error(errorMessage);
-      setError(errorMessage);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  }, [transformPayrollData, updateEarningsAndDeductions]);
-
-  const submitDraftPayroll = useCallback(async (submitPayrollId, submitApproverId, submitEmployeeIds) => {
-    setLoading(true);
-    setError(null);
-    const companyId = localStorage.getItem('companyId');
-
-    if (!companyId) {
-      setLoading(false);
-      setError("Company ID not found in local storage. Cannot submit payroll.");
-      toast.error("Company ID not found. Please log in.");
-      return false;
-    }
-
-    try {
-      const response = await api.post( // Use 'api' instance
-        `${BASE_URL}/payrolls/${companyId}/submit`, // Dynamic companyId
-        {
-          payrollId: submitPayrollId,
-          approverId: submitApproverId,
-          employeeIds: submitEmployeeIds
-        }
-      );
-
-      if (response.data?.success) {
-        toast.success(response.data.message || "Payroll submitted for approval");
-        setSelectedEmployees(new Set());
-        // Re-fetch read-only status for the *current* selected status after submission
-        await fetchReadOnlyStatus(selectedStatus, response.data.payrollId || submitPayrollId); // Use response.data.payrollId if available
-        return true;
-      } else {
-        const errorMessage = response.data.message || "Failed to submit payroll";
-        toast.error(errorMessage);
-        setError(errorMessage);
-        return false;
-      }
-    } catch (error) {
-      console.error("Error submitting payroll", error);
-      const errorMessage = error.response?.data?.message || error.message || "Failed to submit payroll";
-      toast.error(errorMessage);
-      setError(errorMessage);
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchReadOnlyStatus, selectedStatus]);
-
-  const approvePayroll = useCallback(async (approvePayrollId, approveEmployeeIds) => {
-    setLoading(true);
-    setError(null);
-    const companyId = localStorage.getItem('companyId');
-
-    if (!companyId) {
-      setLoading(false);
-      setError("Company ID not found in local storage. Cannot approve payroll.");
-      toast.error("Company ID not found. Please log in.");
-      return false;
-    }
-    // Check if currentUserId is available
-    if (!currentUserId) {
-        setLoading(false);
-        setError("Current user ID not available. Cannot approve payroll.");
-        toast.error("User not logged in or user data missing from local storage.");
-        return false;
-    }
-    // Check if the current user has the required role to approve using the memoized function
-    if (!canApprovePayroll()) { // Call canApprovePayroll as a function
-        setLoading(false);
-        setError("You do not have the required role (SuperAdmin, HR, Accountant) to approve payroll.");
-        toast.error("Insufficient permissions to approve payroll.");
-        return false;
-    }
-
-
-    try {
-      // Use the current user's ID for processedBy directly
-      const response = await api.post(
-        `${BASE_URL}/payrolls/${companyId}/approve`,
-        {
-          payrollId: approvePayrollId,
-          processedBy: currentUserId, // Automatically set to current user's ID
-          employeeIds: approveEmployeeIds
-        }
-      );
-
-      if (response.data?.success) {
-        toast.success(response.data.message || "Payroll approved");
-        setSelectedEmployees(new Set());
-        setProcessedBy(currentUserId); // Update context state with the processor's ID
-        await fetchReadOnlyStatus(selectedStatus, response.data.payrollId || approvePayrollId);
-        return true;
-      } else {
-        const errorMessage = response.data.message || "Failed to approve payroll";
-        toast.error(errorMessage);
-        setError(errorMessage);
-        return false;
-      }
-    } catch (error) {
-      console.error("Error approving payroll", error);
-      const errorMessage = error.response?.data?.message || error.message || "Failed to approve payroll";
-      toast.error(errorMessage);
-      setError(errorMessage);
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchReadOnlyStatus, selectedStatus, currentUserId, canApprovePayroll]); // Added currentUserId and canApprovePayroll to dependencies
-
-  useEffect(() => {
-    if (!payrollDataRaw) {
-      setFilteredPayrollData([]);
-      return;
-    }
-    const filteredData = payrollDataRaw.filter((emp) => {
-      // Use optional chaining and nullish coalescing to handle potential null/undefined IDs
-      const departmentMatch =
-        !filters?.departments?.length || filters.departments.includes(emp.departmentId);
-      const jobTitleMatch =
-        !filters?.jobTitles?.length || filters.filters.departments.includes(emp.departmentId); // Fix: Corrected filter here, was filters.filters.departments
-      const projectMatch =
-        !filters?.projects?.length || filters.projects.includes(emp.projectId);
-      const modeMatch =
-        !filters?.modes?.length || filters.modes.includes(emp.paymentMethod);
-      const employmentTypeMatch =
-        !filters?.employmentTypes?.length || filters.employmentTypes.includes(emp.employmentType);
-
+  const filteredPayrollData = useMemo(() => {
+    if (!payrollDataRaw.length) return [];
+    return payrollDataRaw.filter((emp) => {
+      const matches = (key, values) =>
+        !values?.length || values.includes(emp[key]);
       return (
-        departmentMatch &&
-        jobTitleMatch &&
-        projectMatch &&
-        modeMatch &&
-        employmentTypeMatch
+        matches("departmentId", filters.departments) &&
+        matches("jobTitleId", filters.jobTitles) &&
+        matches("projectId", filters.projects) &&
+        matches("paymentMethod", filters.modes) &&
+        matches("employmentType", filters.employmentTypes)
       );
     });
-    setFilteredPayrollData(filteredData);
   }, [payrollDataRaw, filters]);
+
+  const generatePreview = useCallback(
+    async (dates) => {
+      if (
+        !dates?.payPeriodStartDate ||
+        !dates?.payPeriodEndDate ||
+        !dates?.paymentDate
+      ) {
+        toast.error("Please select all date fields");
+        return;
+      }
+
+      // console.log("These are the dates:", dates);
+
+      setIsLoading(true);
+      try {
+        const res = await api.post(
+          `${BASE_URL}/payrolls/initiate/company/${companyId}`,
+          {
+            payPeriodStartDate: dates.payPeriodStartDate,
+            payPeriodEndDate: dates.payPeriodEndDate,
+            paymentDate: dates.paymentDate,
+          }
+        );
+
+        // console.log("This is the payload:", payPeriodStartDate, payPeriodEndDate, paymentDate);
+
+        if (res.data?.success) {
+          const transformed = transformPayrollData(res.data.data);
+          setPayrollDataRaw(transformed);
+          updateEarningsAndDeductions(transformed);
+          setPayrollId(res.data.payrollId || null);
+          setIsPreviewGenerated(true);
+          setRejectionReason("");
+          toast.success("Preview generated");
+        } else {
+          toast.error(res.data.message || "Preview failed");
+        //   setTimeout(() => {
+        //   router.push("/authenticated/dashboard");
+        // }, 1000);
+        }
+      } catch (err) {
+        toast.error(err.message);
+        setQueryError(err);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [companyId, transformPayrollData, updateEarningsAndDeductions]
+  );
+
+  const submitDraftPayroll = useCallback(
+    async (id, approver, employees) => {
+      setIsLoading(true);
+      try {
+        const res = await api.post(`${BASE_URL}/payrolls/${companyId}/submit`, {
+          payrollId: id,
+          approverId: approver,
+          employeeIds: employees,
+        });
+
+        if (res.data?.success) {
+          toast.success("Submitted for approval");
+          setSelectedEmployees(new Set());
+          fetchPayrollStatus();
+        } else {
+          toast.error(res.data.message);
+        }
+      } catch (err) {
+        toast.error(err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [companyId, fetchPayrollStatus]
+  );
+
+  const approvePayroll = useCallback(
+    async (id, employees) => {
+      setIsLoading(true);
+      try {
+        const res = await api.post(`${BASE_URL}/payrolls/${companyId}/approve`, {
+          payrollId: id,
+          processedBy: currentUserId,
+          employeeIds: employees,
+        });
+
+        if (res.data?.success) {
+          toast.success("Payroll approved");
+          setSelectedEmployees(new Set());
+          setProcessedBy(currentUserId);
+          fetchPayrollStatus();
+        } else {
+          toast.error(res.data.message);
+        }
+      } catch (err) {
+        toast.error(err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [companyId, currentUserId, fetchPayrollStatus]
+  );
+
+  const rejectPayroll = useCallback(
+    async (id, employees, reason) => {
+      if (!reason?.trim()) {
+        toast.error("Provide a rejection reason");
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const res = await api.post(`${BASE_URL}/payrolls/${companyId}/reject`, {
+          payrollId: id,
+          rejectedBy: currentUserId,
+          employeeIds: employees,
+          rejectionReason: reason,
+        });
+
+        if (res.data?.success) {
+          toast.success("Payroll rejected");
+          setSelectedEmployees(new Set());
+          setRejectedBy(currentUserId);
+          setRejectionReason(reason);
+          fetchPayrollStatus();
+        } else {
+          toast.error(res.data.message);
+        }
+      } catch (err) {
+        toast.error(err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [companyId, currentUserId, fetchPayrollStatus]
+  );
 
   const resetSelection = useCallback(() => {
     setSelectedEmployees(new Set());
     setApproverId(null);
     setProcessedBy("");
+    setRejectedBy("");
+    setRejectionReason("");
   }, []);
 
   return (
@@ -383,28 +361,34 @@ export const PayrollProvider = ({ children }) => {
         setApproverId,
         processedBy,
         setProcessedBy,
+        rejectedBy,
+        setRejectedBy,
         selectedEmployees,
         setSelectedEmployees,
         visibleColumns,
-        setVisibleColumns,
         earningsTypes,
         deductionsTypes,
         generatePreview,
-        fetchReadOnlyStatus,
         filters,
         setFilters,
-        loading,
+        loading: isLoading,
         payrollId,
         setPayrollId,
         resetSelection,
         submitDraftPayroll,
         approvePayroll,
+        rejectPayroll,
         noDataMessage,
         isPreviewGenerated,
-        errorState: error,
-        currentUserId, // Expose currentUserId
-        currentUserRole, // Expose currentUserRole
-        canApprovePayroll // Expose approval permission (now a function)
+        errorState: queryError?.message,
+        currentUserId,
+        currentUserRole,
+        canApprovePayroll,
+        canRejectPayroll,
+        rejectionReason,
+        setRejectionReason,
+        companyId,
+        fetchPayrollData: fetchPayrollStatus,
       }}
     >
       {children}
@@ -413,6 +397,3 @@ export const PayrollProvider = ({ children }) => {
 };
 
 export const usePayrollContext = () => useContext(PayrollContext);
-
-
-

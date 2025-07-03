@@ -1,6 +1,5 @@
 const { Company, User, sequelize } = require('../models');
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
 
 // Create Company (Registration) with Super User
 exports.createCompany = async (req, res) => {
@@ -8,6 +7,11 @@ exports.createCompany = async (req, res) => {
     try {
         // Validate input
         const { password, ...companyData } = req.body;
+
+         if (!companyData.companyLogo || companyData.companyLogo === '') {
+            companyData.companyLogo = null;
+        }
+        // console.log('Company Data:', companyData);
 
         if (!password) {
             await transaction.rollback();
@@ -25,20 +29,19 @@ exports.createCompany = async (req, res) => {
                 error: 'Weak password' 
             });
         }
-        // Hash the password
+
         const hashedPassword = await bcrypt.hash(password.trim(), 12);
-        // Create the company
         const newCompany = await Company.create({ 
             ...companyData, 
             password: hashedPassword 
         }, { transaction });
-        // Create Super User (SuperAdmin) for the company
+        // Create Super User 
         const superUser = await User.create({
             companyId: newCompany.id,
             firstName: 'SuperAdmin',
             lastName: companyData.name,
             email: companyData.email,
-            password: hashedPassword, // Same password as company for initial login
+            password: hashedPassword, 
             role: 'SuperAdmin',
             createdAt: new Date(),
             updatedAt: new Date()
@@ -46,11 +49,12 @@ exports.createCompany = async (req, res) => {
 
         await transaction.commit();
         
-        // Remove sensitive data from response
         const companyResponse = newCompany.toJSON();
         delete companyResponse.password;
         const userResponse = superUser.toJSON();
         delete userResponse.password;
+        delete userResponse.resetToken;
+        delete userResponse.resetTokenExpiry;
 
         res.status(201).json({ 
             message: 'Company and super user created successfully', 
@@ -74,13 +78,12 @@ exports.createCompany = async (req, res) => {
     }
 };
 
-
 // Get all Companies
 exports.getAllCompanies = async (req, res) => {
     try {
         const companies = await Company.findAll({ 
             where: { deletedAt: null },
-            attributes: { exclude: ['password'] } // Never return passwords
+            attributes: { exclude: ['password'] } 
         });
         res.status(200).json(companies);
     } catch (error) {
@@ -94,7 +97,7 @@ exports.getCompanyById = async (req, res) => {
     try {
         const company = await Company.findByPk(req.params.id, { 
             where: { deletedAt: null },
-            attributes: { exclude: ['password'] } // Never return password
+            attributes: { exclude: ['password'] } 
         });
         if (!company) {
             return res.status(404).json({ message: 'Company not found' });
@@ -123,6 +126,10 @@ exports.updateCompany = async (req, res) => {
             updateData.password = await bcrypt.hash(password, 12);
         }
 
+        if (companyData.companyLogo === '') {
+            updateData.companyLogo = null; 
+            }
+          
         const [updatedRows] = await Company.update(updateData, {
             where: { id: req.params.id, deletedAt: null },
             transaction
@@ -165,7 +172,7 @@ exports.updateCompany = async (req, res) => {
     }
 };
 
-// Soft Delete Company (and associated users)
+// Soft Delete Company and its Users
 exports.softDeleteCompany = async (req, res) => {
     const transaction = await sequelize.transaction();
     try {

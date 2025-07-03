@@ -5,13 +5,13 @@ import React from 'react';
 export default function DeductionsTable({ deductions = [], onDeductionsChange }) {
   const [editingDeduction, setEditingDeduction] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [apiError, setApiError] = useState(null);
+  const [apiError, setApiError] = useState(null); 
 
-  // Handle status toggle
+  // Handle status toggle - now directly calls onDeductionsChange which triggers a re-fetch
   const handleToggleStatus = (index) => {
-    const updatedDeductions = [...deductions];
-    updatedDeductions[index].status = updatedDeductions[index].status === 'active' ? 'inactive' : 'active';
-    onDeductionsChange(updatedDeductions);
+    const deductionToUpdate = { ...deductions[index] };
+    deductionToUpdate.status = deductionToUpdate.status === 'active' ? 'inactive' : 'active';
+    onDeductionsChange(deductionToUpdate); // Pass the single updated deduction object
   };
 
   // Handle opening edit modal
@@ -26,12 +26,9 @@ export default function DeductionsTable({ deductions = [], onDeductionsChange })
     setShowEditModal(false);
   };
 
-  // Handle saving edits
+  // Handle saving edits - now directly calls onDeductionsChange which triggers a re-fetch
   const handleSaveEdit = (updatedDeduction) => {
-    const updatedDeductions = deductions.map(deduction => 
-      deduction.id === updatedDeduction.id ? updatedDeduction : deduction
-    );
-    onDeductionsChange(updatedDeductions);
+    onDeductionsChange(updatedDeduction); // Pass the single updated deduction object
     setShowEditModal(false);
   };
 
@@ -105,16 +102,16 @@ export default function DeductionsTable({ deductions = [], onDeductionsChange })
 
 {/* Edit Modal */}
 {showEditModal && editingDeduction && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold">Edit Deduction</h2>
-              <button onClick={handleCloseEdit} className="text-gray-500 hover:text-gray-700">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {/* <button onClick={handleCloseEdit} className="text-gray-500 hover:text-gray-700">
+                <svg xmlns="http://www.w3.og-black bg-opacity-50rg/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="18" y1="6" x2="6" y2="18"></line>
                   <line x1="6" y1="6" x2="18" y2="18"></line>
                 </svg>
-              </button>
+              </button> */}
             </div>
             
             <form
@@ -122,12 +119,12 @@ export default function DeductionsTable({ deductions = [], onDeductionsChange })
                 e.preventDefault();
                 const formData = {
                   ...editingDeduction,
-                  // No longer collecting these values from form inputs
-                  // as they should remain unchanged
                   isTaxable: e.target.isTaxable.checked,
                   status: e.target.status.value,
-                  startDate: e.target.startDate.value,
                 };
+                if (editingDeduction.fixedAmount) {
+                  formData.fixedAmount = editingDeduction.fixedAmount;
+                }
                 handleSaveEdit(formData);
               }}
               className="space-y-4"
@@ -150,6 +147,7 @@ export default function DeductionsTable({ deductions = [], onDeductionsChange })
                 <p className="text-xs text-gray-500 mt-1">Cannot be modified after creation</p>
               </div>
 
+              {/* Mode - Read Only */}
               <div>
               <label className="block text-sm font-medium text-gray-700">Mode</label>
               <div className="mt-1 block w-full px-3 py-2 border border-gray-300 bg-gray-100 rounded-md text-gray-700">
@@ -186,18 +184,6 @@ export default function DeductionsTable({ deductions = [], onDeductionsChange })
                 </select>
               </div>
 
-              {/* Start Date */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Start Date *</label>
-                <input
-                  type="date"
-                  name="startDate"
-                  defaultValue={editingDeduction.startDate ? editingDeduction.startDate.split('T')[0] : new Date().toISOString().split('T')[0]}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-cyan-500 focus:border-cyan-500"
-                  required
-                />
-              </div>
-
               {/* Modal Actions */}
               <div className="flex justify-end space-x-3 pt-4">
                 <button
@@ -209,7 +195,7 @@ export default function DeductionsTable({ deductions = [], onDeductionsChange })
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-cyan-500 text-white rounded-md hover:bg-cyan-600"
+                  className="px-4 py-2 bg-cyan-400 text-white rounded-md hover:bg-cyan-600"
                 >
                   Save Changes
                 </button>

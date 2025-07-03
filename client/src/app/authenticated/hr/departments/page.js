@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import EditDepartment from './editDepartment';
 import AddDepartment from './addDepartment';  
+// import AddDepartment from './AddDepartment'; // Ensure this path is correct
 import api, { BASE_URL } from '../../../config/api';
 
 
@@ -44,7 +45,36 @@ export default function DepartmentsPage() {
    * @param {object} departmentData 
    */
  
+const handleAddDepartment = async (departmentData) => {
+  setIsLoading(true);
+  setError(null);
 
+  try {
+    const companyId = localStorage.getItem('companyId');
+    
+    if (!companyId) {
+      throw new Error('Company ID not found in local storage. Please log in again.');
+    }
+
+    const dataToSend = {
+      ...departmentData,
+      companyId: companyId
+    };
+
+    const response = await api.post(`${BASE_URL}/departments`, dataToSend);
+
+    console.log('Department added:', response.data);
+    fetchDepartments();
+    setShowAddModal(false);
+    setError(null);
+  } catch (err) {
+    console.error('Error adding department:', err);
+    const errorMessage = err.response?.data?.message || err.message || 'Failed to add department. Please try again.';
+    setError(errorMessage);
+  } finally {
+    setIsLoading(false);
+  }
+};
   /**
    * Handles the update of an existing department.
    * Sends a PUT request to the backend using the `api` (axios) instance.
@@ -160,7 +190,7 @@ export default function DepartmentsPage() {
         <h2 className="text-2xl font-semibold text-gray-700">Departments Management</h2>
         <div className="flex items-center gap-4">
           {/* Export Departments Button */}
-          <button
+          {/* <button
             className="flex items-center text-blue-600 hover:text-blue-800 transition-colors duration-200 p-2 rounded-md hover:bg-blue-100"
             onClick={() => {
               // Implement bulk export functionality here
@@ -175,7 +205,7 @@ export default function DepartmentsPage() {
               <line x1="12" y1="15" x2="12" y2="3"></line>
             </svg>
             <span className="ml-2 font-medium">Export</span>
-          </button>
+          </button> */}
 
           {/* Add Department Button */}
           <button

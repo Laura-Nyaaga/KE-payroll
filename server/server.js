@@ -26,6 +26,7 @@ app.use(morgan('combined')); // Log requests to the console
 
 const allowedOrigins = [
     'http://localhost:3000', 
+    'https://mobilitysolutionske.com',
     'http://192.168.100.84:3000',
     'http://192.168.100.86:3000'
   ];
@@ -43,17 +44,9 @@ const allowedOrigins = [
      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], // Allow all necessary methods
   allowedHeaders: ['Content-Type', 'Authorization'],
   }));
-  
-  
-// app.use(cors({
-//     origin: '*',
-//     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-//     credentials: true,
-//     // allowedHeaders: ['Content-Type', 'Authorization']
-// }));
 
-// app.use(cors());
-
+app.options('*', cors()); 
+  
 
 // Swagger Route
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -64,12 +57,15 @@ app.get("/", (req, res) => {
 
 // Routes
 app.use(routes); 
+app.use('/api', routes);
+app.use('/uploads', express.static('uploads'));
+
 
 // Function to start the server after syncing the database
 async function startServer() {
     try {
-        // Sync the database (force: false means it won't drop existing tables)
-        await sequelize.sync({ force : false });
+        // await sequelize.sync({ sync : false });
+        await sequelize.sync({ force: false }); // Use force: true only in development to drop and recreate tables
         console.log('Database synced successfully');
 
 
@@ -86,8 +82,6 @@ app._router.stack.forEach((middleware) => {
     }
 });
 
-
-        // Start the server
         app.listen(PORT, () => {
             console.log(`Server is running on http://localhost:${PORT}`);
         });

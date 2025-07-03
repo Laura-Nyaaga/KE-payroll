@@ -12,7 +12,8 @@ export default function ThemeWrapper({ children }) {
   }, []);
 
   if (!mounted) {
-    return <div className="h-screen">{children}</div>;
+    return null;
+    // return <div className="h-screen">{children}</div>;
   }
 
   return (

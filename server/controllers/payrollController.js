@@ -1,18 +1,32 @@
+require("dotenv").config();
 const { Payroll, PayrollItem } = require("../models/payrollModel");
-const { Employee, Company } = require("../models");
+const { Employee, Company, Department, JobTitle, User } = require("../models");
 const { Op, Sequelize } = require("sequelize");
 const PayrollCalculationService = require("../utils/payrollCalculationService");
+const nodemailer = require("nodemailer");
+const archiver = require("archiver");
+const fs = require("fs");
+const { promises: fsPromises } = require("fs");
+const { spawn } = require("child_process");
+const { personalRelief } = require("../config/statutoryRates");
 
 class PayrollController {
+  constructor() {
+    this.sendPayslipsEmail = this.sendPayslipsEmail.bind(this); // Bind the method
+    this.downloadPayslipsPDF = this.downloadPayslipsPDF.bind(this); // Bind the method
+    this.getEmployeePayslip = this.getEmployeePayslip.bind(this);
+    this.getEmployeePayslipData = this.getEmployeePayslipData.bind(this);
+  }
+
   async getPayrollPreview(req, res) {
     const { companyId } = req.params;
     const { payPeriodStartDate, payPeriodEndDate, paymentDate } = req.body;
 
-    console.log( "These are the received dates:", {
-      payPeriodStartDate, 
+    console.log("These are the received dates:", {
+      payPeriodStartDate,
       payPeriodEndDate,
-      paymentDate
-      });
+      paymentDate,
+    });
 
     if (!payPeriodStartDate || !payPeriodEndDate || !paymentDate) {
       return res
@@ -39,27 +53,27 @@ class PayrollController {
       const earliestAllowedDate = new Date();
       earliestAllowedDate.setMonth(currentDate.getMonth() - 3);
 
-      const earliestAllowedMonth = earliestAllowedDate.getMonth() + 1;
-      const earliestAllowedYear = earliestAllowedDate.getFullYear();
+      // const earliestAllowedMonth = earliestAllowedDate.getMonth() + 1;
+      // const earliestAllowedYear = earliestAllowedDate.getFullYear();
 
       // Ensure payroll is within the allowed range
-      const isTooOld =
-        payrollYear < earliestAllowedYear ||
-        (payrollYear === earliestAllowedYear &&
-          payrollMonth < earliestAllowedMonth);
+      // const isTooOld =
+      //   payrollYear < earliestAllowedYear ||
+      //   (payrollYear === earliestAllowedYear &&
+      //     payrollMonth < earliestAllowedMonth);
       const isFutureMonth =
         payrollYear > currentYear ||
         (payrollYear === currentYear && payrollMonth > currentMonth);
 
-      if (isTooOld) {
-        return res.status(400).json({
-          message: `Payroll for ${payrollDate.toLocaleString("default", {
-            month: "long",
-          })},
-               ${payrollYear} is too far in the past. 
-              You can only process payroll for the last three months.`,
-        });
-      }
+      // if (isTooOld) {
+      //   return res.status(400).json({
+      //     message: `Payroll for ${payrollDate.toLocaleString("default", {
+      //       month: "long",
+      //     })},
+      //          ${payrollYear} is too far in the past. 
+      //         You can only process payroll for the last three months.`,
+      //   });
+      // }
 
       if (isFutureMonth) {
         return res.status(400).json({
@@ -100,6 +114,8 @@ class PayrollController {
         paymentDate,
         submittedAt: new Date(),
       });
+
+      console.log("Payroll batch created:", payroll);
 
       let totalGross = 0;
       let totalNet = 0;
@@ -539,23 +555,6 @@ class PayrollController {
         });
       }
 
-      // First, auto-reject any pending items older than 3 days
-      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-      await PayrollItem.update(
-        {
-          payrollStatus: "rejected",
-          // rejectionReason: "Automatically rejected after 3 days pending",
-          rejectedAt: new Date(),
-        },
-        {
-          where: {
-            payrollId,
-            payrollStatus: "pending",
-            processingDate: { [Op.lt]: threeDaysAgo },
-          },
-        }
-      );
-
       const employees = await Employee.findAll({
         where: { id: employeeIds, companyId },
         attributes: [
@@ -677,7 +676,7 @@ class PayrollController {
               statutory: payrollData.statutory,
               netPay: payrollData.netPaye,
               taxableIncome: payrollData.taxableIncome,
-              payrollStatus: "approved",
+              payrollStatus: "processed",
               processingDate: new Date(),
             });
           })
@@ -732,151 +731,24 @@ class PayrollController {
       });
     }
   }
-  async getRejectedPayroll(req, res) {
+
+  async rejectPayroll(req, res) {
     const { companyId } = req.params;
-    const { payrollId } = req.body;
+    const { payrollId, rejectedBy, rejectionReason, employeeIds } = req.body;
 
-    try {
-      const payroll = await Payroll.findOne({
-        where: { id: payrollId, companyId },
-      });
-
-      if (!payroll) {
-        return res.status(404).json({
-          success: false,
-          message: "Rejected payroll not found for this company.",
-        });
-      }
-
-      const payrollItems = await PayrollItem.findAll({
-        where: { payrollId, payrollStatus: "rejected" },
-        include: [
-          {
-            model: Employee,
-            as: "employee",
-            attributes: [
-              "id",
-              "firstName",
-              "lastName",
-              "staffNo",
-              "basicSalary",
-              "paymentMethod",
-              "departmentId",
-              "jobTitleId",
-              "projectId",
-              "employmentType",
-            ],
-          },
-        ],
-        order: [["employeeId", "ASC"]],
-      });
-
-      if (!payrollItems.length) {
-        return res.status(404).json({
-          success: false,
-          message: "No payroll items found for this rejected batch.",
-        });
-      }
-
-      // Group items by employee
-      const employeeMap = {};
-
-      for (const item of payrollItems) {
-        const empId = item.employeeId;
-        if (!employeeMap[empId]) {
-          const emp = item.employee;
-          employeeMap[empId] = {
-            employeeId: emp.id,
-            staffId: emp.staffNo,
-            fullName: `${emp.firstName} ${emp.lastName}`,
-            departmentId: emp.departmentId,
-            jobTitleId: emp.jobTitleId,
-            basicSalary: emp.basicSalary,
-            paymentMethod: emp.paymentMethod,
-            projectId: emp.projectId,
-            employmentType: emp.employmentType,
-            grossPay: 0,
-            totalEarnings: 0,
-            totalDeductions: 0,
-            statutory: {},
-            netPay: 0,
-            taxableIncome: 0,
-            earnings: [],
-            deductions: [],
-          };
-        }
-
-        const empRecord = employeeMap[empId];
-
-        switch (item.itemType) {
-          case "earning":
-            empRecord.earnings.push({
-              name: item.itemName,
-              amount: item.amount,
-            });
-            empRecord.totalEarnings += Number(item.amount);
-            break;
-          case "deduction":
-            empRecord.deductions.push({
-              name: item.itemName,
-              amount: item.amount,
-            });
-            empRecord.totalDeductions += Number(item.amount);
-            break;
-          case "statutory":
-            empRecord.statutory[item.itemName] = Number(item.amount);
-            break;
-          case "basic_salary":
-            empRecord.grossPay += Number(item.amount);
-            break;
-        }
-      }
-
-      const formattedEmployees = Object.values(employeeMap).map((emp) => {
-        const statutoryTotal = Object.values(emp.statutory).reduce(
-          (sum, val) => sum + val,
-          0
-        );
-
-        emp.netPay =
-          emp.grossPay +
-          emp.totalEarnings -
-          emp.totalDeductions -
-          statutoryTotal;
-        emp.taxableIncome = emp.grossPay + emp.totalEarnings;
-
-        return emp;
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: "Rejected payroll retrieved successfully.",
-        payrollId: payroll.id,
-        payrollStatus: payroll.payrollStatus,
-        metadata: {
-          companyId,
-          payPeriodStartDate: payroll.payPeriodStartDate,
-          payPeriodEndDate: payroll.payPeriodEndDate,
-          paymentDate: payroll.paymentDate,
-          submittedAt: payroll.submittedAt,
-          approvalDate: payroll.approvalDate,
-          notes: payroll.notes || "No additional details",
-        },
-        data: formattedEmployees,
-      });
-    } catch (error) {
-      console.error("Error fetching rejected payroll:", error);
-      return res.status(500).json({
+    if (!Array.isArray(employeeIds)) {
+      return res.status(400).json({
         success: false,
-        message: "Failed to fetch rejected payroll",
-        error: error.message,
+        message: "Employee IDs must be provided as an array.",
       });
     }
-  }
 
-  async getExpiredPayroll(req, res) {
-    const { companyId } = req.params;
-    const { payrollId } = req.body;
+    if (!rejectionReason || rejectionReason.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "Rejection reason is required.",
+      });
+    }
 
     try {
       const payroll = await Payroll.findOne({
@@ -886,131 +758,179 @@ class PayrollController {
       if (!payroll) {
         return res.status(404).json({
           success: false,
-          message: "Expired payroll not found for this company.",
+          message: "Payroll not found.",
         });
       }
 
-      const payrollItems = await PayrollItem.findAll({
-        where: { payrollId, payrollStatus: "expired" },
-        include: [
-          {
-            model: Employee,
-            as: "employee",
-            attributes: [
-              "id",
-              "firstName",
-              "lastName",
-              "staffNo",
-              "basicSalary",
-              "paymentMethod",
-              "departmentId",
-              "jobTitleId",
-              "projectId",
-              "employmentType",
-            ],
-          },
+      const employees = await Employee.findAll({
+        where: { id: employeeIds, companyId },
+        attributes: [
+          "id",
+          "staffNo",
+          "firstName",
+          "lastName",
+          "basicSalary",
+          "departmentId",
+          "jobTitleId",
+          "projectId",
+          "employmentType",
+          "paymentMethod",
+          "mobileNumber",
+          "accountName",
+          "bankName",
+          "branchName",
+          "accountNumber",
+          "branchCode",
+          "bankCode",
         ],
-        order: [["employeeId", "ASC"]],
       });
 
-      if (!payrollItems.length) {
+      if (employees.length === 0) {
         return res.status(404).json({
           success: false,
-          message: "No payroll items found for this expired batch.",
+          message: "No matching employees found.",
         });
       }
 
-      // Group items by employee
-      const employeeMap = {};
+      // Verify all selected employees have pending payroll items
+      const rejectedItems = await PayrollItem.findAll({
+        where: {
+          payrollId,
+          employeeId: employeeIds,
+          payrollStatus: "pending",
+        },
+      });
 
-      for (const item of payrollItems) {
-        const empId = item.employeeId;
-        if (!employeeMap[empId]) {
-          const emp = item.employee;
-          employeeMap[empId] = {
-            employeeId: emp.id,
-            staffId: emp.staffNo,
-            fullName: `${emp.firstName} ${emp.lastName}`,
-            departmentId: emp.departmentId,
-            jobTitleId: emp.jobTitleId,
-            basicSalary: emp.basicSalary,
-            paymentMethod: emp.paymentMethod,
-            employmentType: emp.employmentType,
-            projectId: emp.projectId,
-            grossPay: 0,
-            totalEarnings: 0,
-            totalDeductions: 0,
-            statutory: {},
-            netPay: 0,
-            taxableIncome: 0,
-            earnings: [],
-            deductions: [],
-          };
-        }
+      const uniqueRejectedItems = [
+        ...new Set(rejectedItems.map((item) => item.employeeId)),
+      ];
 
-        const empRecord = employeeMap[empId];
+      if (uniqueRejectedItems.length !== employeeIds.length) {
+        const missingRejection = employeeIds.filter(
+          (id) => !uniqueRejectedItems.includes(id)
+        );
+        return res.status(400).json({
+          success: false,
+          message: "Some employees don't have pending payroll records.",
+          missingRejection,
+        });
+      }
+      const processedEmployees = [];
+      let totalGross = 0;
+      let totalNet = 0;
+      let totalStatutory = {};
 
-        switch (item.itemType) {
-          case "earning":
-            empRecord.earnings.push({
-              name: item.itemName,
-              amount: item.amount,
+      const batchSize = 10;
+      for (let i = 0; i < employees.length; i += batchSize) {
+        const batch = employees.slice(i, i + batchSize);
+
+        await Promise.all(
+          batch.map(async (employee) => {
+            const payrollData =
+              await PayrollCalculationService.calculateEmployeePayroll(
+                employee,
+                {
+                  start: payroll.payPeriodStartDate,
+                  end: payroll.payPeriodEndDate,
+                }
+              );
+
+            await PayrollItem.update(
+              {
+                payrollStatus: "rejected", // Update status to processed
+              },
+              { where: { payrollId, employeeId: employee.id } }
+            );
+
+            // Update totals
+            totalGross += payrollData.grossPay;
+            totalNet += payrollData.netPaye;
+            for (const [key, value] of Object.entries(
+              payrollData.statutory || {}
+            )) {
+              totalStatutory[key] = (totalStatutory[key] || 0) + value;
+            }
+
+            processedEmployees.push({
+              employeeId: employee.id,
+              staffId: employee.staffNo,
+              fullName: `${employee.firstName} ${employee.lastName}`,
+              basicSalary: employee.basicSalary,
+              departmentId: employee.departmentId,
+              jobTitleId: employee.jobTitleId,
+              projectId: employee.projectId,
+              employmentType: employee.employmentType,
+              paymentMethod: employee.paymentMethod,
+              mobileNumber: employee.mobileNumber,
+              accountName: employee.accountName,
+              accountNumber: employee.accountNumber,
+              bankName: employee.bankName,
+              branchName: employee.branchName,
+              branchName: employee.branchName,
+              branchCode: employee.branchCode,
+              grossPay: payrollData.grossPay,
+              totalEarnings: payrollData.earnings.reduce(
+                (sum, e) => sum + e.amount,
+                0
+              ),
+              totalDeductions: payrollData.deductions.reduce(
+                (sum, d) => sum + d.amount,
+                0
+              ),
+              statutory: payrollData.statutory,
+              netPay: payrollData.netPaye,
+              taxableIncome: payrollData.taxableIncome,
+              payrollStatus: "rejected",
             });
-            empRecord.totalEarnings += Number(item.amount);
-            break;
-          case "deduction":
-            empRecord.deductions.push({
-              name: item.itemName,
-              amount: item.amount,
-            });
-            empRecord.totalDeductions += Number(item.amount);
-            break;
-          case "statutory":
-            empRecord.statutory[item.itemName] = Number(item.amount);
-            break;
-          case "basic_salary":
-            empRecord.grossPay += Number(item.amount);
-            break;
-        }
+          })
+        );
       }
 
-      const formattedEmployees = Object.values(employeeMap).map((emp) => {
-        const statutoryTotal = Object.values(emp.statutory).reduce(
-          (sum, val) => sum + val,
-          0
-        );
-
-        emp.netPay =
-          emp.grossPay +
-          emp.totalEarnings -
-          emp.totalDeductions -
-          statutoryTotal;
-        emp.taxableIncome = emp.grossPay + emp.totalEarnings;
-
-        return emp;
+      await payroll.update({
+        rejectedBy,
+        rejectionReason,
+        rejectedAt: new Date(),
+        summaryData: {
+          totalGrossPay: totalGross,
+          totalNetPay: totalNet,
+          totalStatutoryDeductions: totalStatutory,
+          totalEmployees: processedEmployees.length,
+        },
       });
+
+      // Get updated status summary including any auto-rejected items
+      const allItems = await PayrollItem.findAll({ where: { payrollId } });
+      const statusSummary = {
+        draft: allItems.filter((i) => i.payrollStatus === "draft").length,
+        pending: allItems.filter((i) => i.payrollStatus === "pending").length,
+        approved: allItems.filter((i) => i.payrollStatus === "approved").length,
+        rejected: allItems.filter((i) => i.payrollStatus === "rejected").length,
+        paid: allItems.filter((i) => i.payrollStatus === "expired").length,
+        total: allItems.length,
+      };
 
       return res.status(200).json({
         success: true,
-        message: "Expired payroll retrieved successfully.",
+        message: `Payroll rejected for ${processedEmployees.length} employees.`,
         payrollId: payroll.id,
-        // payrollStatus: payroll.payrollStatus,
+        rejectedCount: processedEmployees.length,
+        statusSummary,
         metadata: {
           companyId,
           payPeriodStartDate: payroll.payPeriodStartDate,
           payPeriodEndDate: payroll.payPeriodEndDate,
           paymentDate: payroll.paymentDate,
-          expiresAt: payroll.expiresAt,
-          submittedAt: payroll.submittedAt,
-          notes: payroll.notes || "No additional details",
+          rejectionReason,
+          rejectedBy,
         },
-        data: formattedEmployees,
+        summary: payroll.summaryData,
+        data: processedEmployees,
       });
     } catch (error) {
-      console.error("Error fetching expired payroll:", error);
+      console.error("Error rejecting payroll:", error);
       return res.status(500).json({
         success: false,
-        message: "Failed to fetch expired payroll",
+        message: "Failed to reject payroll",
         error: error.message,
       });
     }
@@ -1333,7 +1253,8 @@ class PayrollController {
             submittedAt: payroll.submittedAt,
             approvalDate: payroll.approvalDate,
             processingDate: payroll.processingDate,
-            // expiresAt: payroll.expiresAt,
+            rejectedAt: payroll.rejectedAt,
+            rejectionReason: payroll.rejectionReason,
             notes: payroll.notes || "No additional details",
           },
           summary: payroll.summaryData || {},
@@ -1458,6 +1379,8 @@ class PayrollController {
           approvalDate: payroll.approvalDate,
           processingDate: payroll.processingDate,
           expiresAt: payroll.expiresAt,
+          rejectedAt: payroll.rejectedAt,
+          rejectionReason: payroll.rejectionReason,
           notes: payroll.notes || "No additional details",
         },
         summary: payroll.summaryData || {},
@@ -1625,12 +1548,11 @@ class PayrollController {
     }
   }
 
-  async getPayrollSummaryReport(req, res) {
+  async getPayrollSummary(req, res) {
     const { companyId } = req.params;
     const { year } = req.query; // Optional year filter
 
     try {
-      // Find all payrolls for the company, optionally filtered by year
       const whereClause = { companyId };
       if (year) {
         whereClause.payPeriodStartDate = {
@@ -1643,6 +1565,8 @@ class PayrollController {
         order: [["payPeriodStartDate", "DESC"]],
       });
 
+      // console.log("Payroll data:", payrolls);
+
       if (!payrolls.length) {
         return res.status(404).json({
           success: false,
@@ -1650,154 +1574,68 @@ class PayrollController {
         });
       }
 
-      // Process each payroll to get summary data
       const payrollSummaries = await Promise.all(
         payrolls.map(async (payroll) => {
-          // Get all items for this payroll
           const items = await PayrollItem.findAll({
-            where: { payrollId: payroll.id },
+            where: { payrollId: payroll.id, payrollStatus: "processed" },
           });
+          const employeeIds = [...new Set(items.map((item) => item.employeeId))]
+            .length;
 
-          // Initialize summary values
-          let summary = {
-            totalEmployees: 0,
-            totalBasicSalary: 0,
-            totalGrossPay: 0,
-            totalEarnings: 0,
-            totalDeductions: 0,
-            totalStatutory: 0,
-            totalPAYE: 0,
-            totalNSSF: 0,
-            totalHousingLevy: 0,
-            totalTaxableIncome: 0,
-            totalNetPay: 0,
-            statutoryDetails: {},
-          };
+          // Ensure payPeriodStartDate is a valid Date object
+          let startDate = payroll.payPeriodStartDate;
+          if (!(startDate instanceof Date) || isNaN(startDate)) {
+            startDate = new Date(payroll.payPeriodStartDate); // Try parsing as string
+          }
+          if (isNaN(startDate)) {
+            console.warn(
+              `Invalid date for payrollId ${payroll.id}: ${payroll.payPeriodStartDate}`
+            );
+            startDate = new Date(); // Fallback to current date for safety
+          }
 
-          // Group items by employee
-          const employeeItems = {};
-          items.forEach((item) => {
-            if (!employeeItems[item.employeeId]) {
-              employeeItems[item.employeeId] = [];
-            }
-            employeeItems[item.employeeId].push(item);
+          const startMonth = startDate.toLocaleString("default", {
+            month: "long",
           });
-
-          summary.totalEmployees = Object.keys(employeeItems).length;
-
-          // Calculate totals for each employee
-          Object.values(employeeItems).forEach((empItems) => {
-            let empSummary = {
-              basicSalary: 0,
-              grossPay: 0,
-              earnings: 0,
-              deductions: 0,
-              statutory: 0,
-              PAYE: 0,
-              NSSF: 0,
-              housingLevy: 0,
-              taxableIncome: 0,
-              netPay: 0,
-            };
-
-            empItems.forEach((item) => {
-              switch (item.itemType) {
-                case "basic_salary":
-                  empSummary.basicSalary += Number(item.amount);
-                  empSummary.grossPay += Number(item.amount);
-                  empSummary.taxableIncome += Number(item.amount);
-                  break;
-                case "earning":
-                  empSummary.earnings += Number(item.amount);
-                  empSummary.grossPay += Number(item.amount);
-                  if (item.isTaxable) {
-                    empSummary.taxableIncome += Number(item.amount);
-                  }
-                  break;
-                case "deduction":
-                  empSummary.deductions += Number(item.amount);
-                  if (item.isTaxable) {
-                    empSummary.taxableIncome -= Number(item.amount);
-                  }
-                  break;
-                case "statutory":
-                  empSummary.statutory += Number(item.amount);
-                  // Categorize statutory deductions
-                  if (item.itemName.toLowerCase().includes("paye")) {
-                    empSummary.PAYE += Number(item.amount);
-                  } else if (item.itemName.toLowerCase().includes("nssf")) {
-                    empSummary.NSSF += Number(item.amount);
-                  } else if (item.itemName.toLowerCase().includes("housing")) {
-                    empSummary.housingLevy += Number(item.amount);
-                  }
-                  break;
-              }
-            });
-
-            empSummary.netPay =
-              empSummary.grossPay -
-              empSummary.deductions -
-              empSummary.statutory;
-
-            // Add employee totals to payroll summary
-            summary.totalBasicSalary += empSummary.basicSalary;
-            summary.totalGrossPay += empSummary.grossPay;
-            summary.totalEarnings += empSummary.earnings;
-            summary.totalDeductions += empSummary.deductions;
-            summary.totalStatutory += empSummary.statutory;
-            summary.totalPAYE += empSummary.PAYE;
-            summary.totalNSSF += empSummary.NSSF;
-            summary.totalHousingLevy += empSummary.housingLevy;
-            summary.totalTaxableIncome += empSummary.taxableIncome;
-            summary.totalNetPay += empSummary.netPay;
-          });
-
-          // Format the payroll period
-          const startMonth = payroll.payPeriodStartDate.toLocaleString(
-            "default",
-            { month: "short" }
-          );
-          const endMonth = payroll.payPeriodEndDate.toLocaleString("default", {
-            month: "short",
-          });
-          const period =
-            payroll.payPeriodStartDate.getFullYear() ===
-            payroll.payPeriodEndDate.getFullYear()
-              ? `${startMonth} - ${endMonth} ${payroll.payPeriodStartDate.getFullYear()}`
-              : `${startMonth} ${payroll.payPeriodStartDate.getFullYear()} - ${endMonth} ${payroll.payPeriodEndDate.getFullYear()}`;
+          const year = startDate.getFullYear();
 
           return {
-            payrollId: payroll.id,
-            period,
-            payPeriodStartDate: payroll.payPeriodStartDate,
-            payPeriodEndDate: payroll.payPeriodEndDate,
-            paymentDate: payroll.paymentDate,
-            payrollStatus: payroll.payrollStatus,
-            ...summary,
+            id: payroll.id,
+            month: startMonth,
+            year,
+            noOfEmployees: employeeIds,
           };
         })
       );
 
+      const totalMonths = payrollSummaries.length;
+      const totalEmployees = payrollSummaries.reduce(
+        (sum, p) => sum + p.noOfEmployees,
+        0
+      );
+
       return res.status(200).json({
         success: true,
-        message: "Payroll summary report generated successfully.",
         data: payrollSummaries,
+        summary: { totalMonths, totalEmployees },
       });
     } catch (error) {
-      console.error("Error generating payroll summary report:", error);
+      console.error("Error generating payroll summary:", error);
       return res.status(500).json({
         success: false,
-        message: "Failed to generate payroll summary report",
+        message: "Failed to generate payroll summary",
         error: error.message,
       });
     }
   }
 
   async getPayrollBatchDetails(req, res) {
-    const { payrollId } = req.params;
+    const { companyId, payrollId } = req.params;
 
     try {
-      const payroll = await Payroll.findByPk(payrollId);
+      const payroll = await Payroll.findByPk(payrollId, {
+        where: { companyId },
+      });
       if (!payroll) {
         return res.status(404).json({
           success: false,
@@ -1805,9 +1643,8 @@ class PayrollController {
         });
       }
 
-      // Get all items for this payroll
       const items = await PayrollItem.findAll({
-        where: { payrollId },
+        where: { payrollId, payrollStatus: "processed" },
         include: [
           {
             model: Employee,
@@ -1817,166 +1654,38 @@ class PayrollController {
               "firstName",
               "lastName",
               "staffNo",
-              "departmentId",
-              "jobTitleId",
-              "mobileNumber",
-              "accountName",
-              "accountNumber",
-              "bankName",
-              "branchName",
-              "branchCode",
-              "bankCode",
+              "basicSalary",
             ],
           },
         ],
-        order: [["employeeId", "ASC"]],
       });
 
       if (!items.length) {
         return res.status(404).json({
           success: false,
-          message: "No payroll items found in this batch.",
+          message: "No processed payroll items found in this batch.",
         });
       }
 
-      // Initialize summary
-      const summary = {
-        totalEmployees: 0,
-        totalBasicSalary: 0,
-        totalGrossPay: 0,
-        totalEarnings: 0,
-        totalDeductions: 0,
-        totalStatutory: 0,
-        totalPAYE: 0,
-        totalNSSF: 0,
-        totalHousingLevy: 0,
-        totalTaxableIncome: 0,
-        totalNetPay: 0,
-        statutoryDetails: {},
-      };
-
-      // Group items by employee and calculate totals
-      const employeeMap = {};
-      const employeeItems = {};
-
-      items.forEach((item) => {
-        if (!employeeItems[item.employeeId]) {
-          employeeItems[item.employeeId] = [];
-        }
-        employeeItems[item.employeeId].push(item);
-      });
-
-      summary.totalEmployees = Object.keys(employeeItems).length;
-
-      // Process each employee
-      const employeeDetails = Object.entries(employeeItems).map(
-        ([empId, empItems]) => {
-          const employee = empItems[0].employee;
-          const empDetail = {
-            employeeId: employee.id,
-            staffId: employee.staffNo,
-            fullName: `${employee.firstName} ${employee.lastName}`,
-            departmentId: employee.departmentId,
-            jobTitleId: employee.jobTitleId,
-            mobileNumber: employee.mobileNumber,
-            accountName: employee.accountName,
-            accountNumber: employee.accountNumber,
-            bankName: employee.bankName,
-            branchName: employee.branchName,
-            branchName: employee.branchName,
-            branchCode: employee.branchCode,
-            basicSalary: 0,
-            grossPay: 0,
-            earnings: [],
-            totalEarnings: 0,
-            deductions: [],
-            totalDeductions: 0,
-            statutory: {},
-            totalStatutory: 0,
-            PAYE: 0,
-            NSSF: 0,
-            housingLevy: 0,
-            taxableIncome: 0,
+      const employeeDetails = items.reduce((acc, item) => {
+        const emp = item.employee;
+        if (!acc[emp.id]) {
+          acc[emp.id] = {
+            employeeId: emp.id,
+            fullName: `${emp.firstName} ${emp.lastName}`,
+            basicSalary: Number(emp.basicSalary) || 0,
             netPay: 0,
+            staffNo: emp.staffNo,
           };
-
-          empItems.forEach((item) => {
-            switch (item.itemType) {
-              case "basic_salary":
-                empDetail.basicSalary = Number(item.amount);
-                empDetail.grossPay += Number(item.amount);
-                empDetail.taxableIncome += Number(item.amount);
-                break;
-              case "earning":
-                empDetail.earnings.push({
-                  name: item.itemName,
-                  amount: Number(item.amount),
-                  isTaxable: item.isTaxable,
-                });
-                empDetail.totalEarnings += Number(item.amount);
-                empDetail.grossPay += Number(item.amount);
-                if (item.isTaxable) {
-                  empDetail.taxableIncome += Number(item.amount);
-                }
-                break;
-              case "deduction":
-                empDetail.deductions.push({
-                  name: item.itemName,
-                  amount: Number(item.amount),
-                  isTaxable: item.isTaxable,
-                });
-                empDetail.totalDeductions += Number(item.amount);
-                if (item.isTaxable) {
-                  empDetail.taxableIncome -= Number(item.amount);
-                }
-                break;
-              case "statutory":
-                empDetail.statutory[item.itemName] = Number(item.amount);
-                empDetail.totalStatutory += Number(item.amount);
-                if (item.itemName.toLowerCase().includes("paye")) {
-                  empDetail.PAYE += Number(item.amount);
-                } else if (item.itemName.toLowerCase().includes("nssf")) {
-                  empDetail.NSSF += Number(item.amount);
-                } else if (item.itemName.toLowerCase().includes("housing")) {
-                  empDetail.housingLevy += Number(item.amount);
-                }
-                break;
-            }
-          });
-
-          empDetail.netPay =
-            empDetail.grossPay -
-            empDetail.totalDeductions -
-            empDetail.totalStatutory;
-
-          // Add to summary totals
-          summary.totalBasicSalary += empDetail.basicSalary;
-          summary.totalGrossPay += empDetail.grossPay;
-          summary.totalEarnings += empDetail.totalEarnings;
-          summary.totalDeductions += empDetail.totalDeductions;
-          summary.totalStatutory += empDetail.totalStatutory;
-          summary.totalPAYE += empDetail.PAYE;
-          summary.totalNSSF += empDetail.NSSF;
-          summary.totalHousingLevy += empDetail.housingLevy;
-          summary.totalTaxableIncome += empDetail.taxableIncome;
-          summary.totalNetPay += empDetail.netPay;
-
-          return empDetail;
         }
-      );
+        acc[emp.id].netPay += Number(item.amount) || 0; // Aggregate net pay if needed
+        return acc;
+      }, {});
 
       return res.status(200).json({
         success: true,
-        message: "Payroll batch details retrieved successfully.",
-        payrollId: payroll.id,
-        payrollStatus: payroll.payrollStatus,
-        period: {
-          start: payroll.payPeriodStartDate,
-          end: payroll.payPeriodEndDate,
-        },
-        paymentDate: payroll.paymentDate,
-        summary,
-        employees: employeeDetails,
+        payrollId,
+        employees: Object.values(employeeDetails),
       });
     } catch (error) {
       console.error("Error fetching payroll batch details:", error);
@@ -2006,12 +1715,12 @@ class PayrollController {
         order: [["payPeriodEndDate", "DESC"]],
       });
 
-      if (!payrolls.length) {
-        return res.status(404).json({
-          success: false,
-          message: "No payroll records found for this company.",
-        });
-      }
+      // if (!payrolls.length) {
+      //   return res.status(404).json({
+      //     success: false,
+      //     message: "No payroll records found for this company.",
+      //   });
+      // }
 
       return res.status(200).json({
         success: true,
@@ -2036,5 +1745,733 @@ class PayrollController {
       });
     }
   }
+
+  async getEmployeePayslipData({ companyId, employeeId, payrollId }) {
+    // const { companyId, employeeId, payrollId } = req.params;
+
+    try {
+      console.log(
+        `Fetching payslip data for companyId: ${companyId}, employeeId: ${employeeId}, payrollId: ${payrollId}`
+      );
+      const payroll = await Payroll.findOne({
+        where: { companyId, id: payrollId },
+        include: [
+          {
+            model: PayrollItem,
+            as: "items",
+            where: { employeeId, payrollStatus: "processed" },
+            required: true,
+          },
+        ],
+      });
+
+      if (!payroll) {
+        throw new Error("Payroll data not found or not processed");
+      }
+
+      const employee = await Employee.findByPk(employeeId);
+      const company = await Company.findByPk(companyId);
+      const department = await Department.findByPk(employee.departmentId, {
+        attributes: ["title"],
+      });
+      const jobTitle = await JobTitle.findByPk(employee.jobTitleId, {
+        attributes: ["name"],
+      });
+      const processor = await User.findByPk(payroll.processedBy, {
+        attributes: ["firstName", "lastName"],
+      });
+
+      if (!employee || !company) {
+        throw new Error("Employee or Company not found");
+      }
+
+      if (!department) {
+        throw new Error("Department not found");
+      }
+
+      if (!jobTitle) {
+        throw new Error("Job title not found");
+      }
+
+      if (!processor) {
+        throw new Error("Payroll processor not found");
+      }
+
+      //payPeriodStartDate is a valid Date object
+      let startDate = payroll.payPeriodStartDate;
+      if (!(startDate instanceof Date) || isNaN(startDate)) {
+        startDate = new Date(payroll.payPeriodStartDate);
+      }
+      if (isNaN(startDate)) {
+        console.warn(
+          `Invalid date for payrollId ${payroll.id}: ${payroll.payPeriodStartDate}`
+        );
+        startDate = new Date();
+      }
+
+      const month = startDate.toLocaleString("default", { month: "long" });
+      const year = startDate.getFullYear();
+
+      let payrollData =
+        await PayrollCalculationService.calculateEmployeePayroll(employee, {
+          start: payroll.payPeriodStartDate,
+          end: payroll.payPeriodEndDate,
+        });
+
+      const payrollItems = payroll.PayrollItems || [];
+      const earnings = { "Basic Salary": payrollData.basicSalary };
+      const specificEarnings = {} || 0;
+      const statutoryDeductions = {
+        NSSF: payrollData.statutory.nssf,
+        SHIF: payrollData.statutory.shif,
+        "Housing Levy": payrollData.statutory.housingLevy,
+        PAYE: payrollData.statutory.paye,
+      };
+      const specificDeductions = {} || 0;
+
+      payrollItems.forEach((item) => {
+        if (item.itemType === "earning" && item.itemName !== "basic_salary") {
+          specificEarnings[item.itemName] = Number(item.amount) || 0;
+        } else if (
+          item.itemType === "deduction" &&
+          !["NSSF", "SHIF", "Housing Levy", "PAYE"].includes(item.itemName)
+        ) {
+          specificDeductions[item.itemName] = Number(item.amount) || 0;
+        }
+      });
+
+      Object.assign(earnings, specificEarnings);
+
+      const grossPay = payrollData.grossPay;
+      // const totalDeductions = payrollData.totalDeductions;
+      const allDeductions = payrollData.allDeductions;
+      const netPay = payrollData.netPaye;
+
+      const payeInfo = {
+        totalEarnings: grossPay,
+        lessPreTaxDeductions: [
+          { label: "NSSF", amount: payrollData.statutory.nssf },
+          { label: "SHIF", amount: payrollData.statutory.shif },
+          { label: "Housing Levy", amount: payrollData.statutory.housingLevy },
+        ],
+        taxablePay: payrollData.taxableIncome,
+        grossTax: payrollData.grossTax,
+        personalRelief: payrollData.personalRelief,
+        insuranceRelief: payrollData.insuranceRelief || 0,
+        housingLevyRelief: payrollData.housingLevyRelief || 0,
+        paye: payrollData.statutory.paye,
+      };
+
+      const payslip = {
+        month: month,
+        year: year,
+        company: company.name,
+        companyLogo: company.companyLogo,
+        payDate: payroll.paymentDate,
+        createdOn:
+          payroll.processingDate || new Date().toISOString().split("T")[0],
+        createdBy: `${processor.firstName} ${processor.lastName}`,
+        staffNo: employee.staffNo,
+        fullName: `${employee.firstName} ${employee.lastName}`,
+        department: department.title,
+        jobTitle: jobTitle.name,
+        currency: employee.currency,
+        kraPin: employee.kraPin,
+        earnings: Object.fromEntries(
+          Object.entries(earnings).map(([key, value]) => [
+            key,
+            formatCurrency(value),
+          ])
+        ),
+        otherEarnings: Object.fromEntries(
+          Object.entries(specificEarnings).map(([key, value]) => [
+            key,
+            formatCurrency(value),
+          ])
+        ),
+        grossPay: formatCurrency(grossPay, employee.currency),
+        statutoryDeductions: Object.fromEntries(
+          Object.entries(statutoryDeductions).map(([key, value]) => [
+            key,
+            formatCurrency(value),
+          ])
+        ),
+        otherDeductions: Object.fromEntries(
+          Object.entries(specificDeductions).map(([key, value]) => [
+            key,
+            formatCurrency(value),
+          ])
+        ),
+        allDeductions: formatCurrency(allDeductions),
+        netPay: formatCurrency(netPay),
+        payeInfo: {
+          ...payeInfo,
+          totalEarnings: formatCurrency(payeInfo.totalEarnings),
+          lessPreTaxDeductions: payeInfo.lessPreTaxDeductions.map((item) => ({
+            ...item,
+            amount: formatCurrency(item.amount),
+          })),
+          taxablePay: formatCurrency(payeInfo.taxablePay),
+          grossTax: formatCurrency(payeInfo.grossTax),
+          personalRelief: formatCurrency(payeInfo.personalRelief),
+          insuranceRelief: formatCurrency(payeInfo.insuranceRelief),
+          housingLevyRelief: formatCurrency(payeInfo.housingLevyRelief),
+          paye: formatCurrency(payeInfo.paye),
+        },
+      };
+
+      return { data: payslip };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getEmployeePayslip(req, res) {
+    try {
+      console.log(`Request params: ${JSON.stringify(req.params)}`); // Debug params
+      const { companyId, employeeId, payrollId } = req.params || {}; // Default to empty object if undefined
+      if (!companyId || !employeeId || !payrollId) {
+        return res.status(400).json({ error: "Missing required parameters" });
+      }
+
+      const result = await this.getEmployeePayslipData({
+        companyId,
+        employeeId,
+        payrollId,
+      });
+      return res.status(200).json(result);
+    } catch (error) {
+      console.error(`Error in getEmployeePayslip: ${error.message}`);
+      return res.status(500).json({ error: error.message });
+    }
+  }
+
+  async sendPayslipsEmail(req, res) {
+    const { companyId } = req.params;
+    const { employeeIds, payrollId } = req.body;
+
+    try {
+      const payroll = await Payroll.findByPk(payrollId, {
+        where: { companyId },
+      });
+      if (!payroll) {
+        return res.status(404).json({ error: "Payroll batch not found" });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: process.env.EMAIL_HOST,
+        port: parseInt(process.env.EMAIL_PORT),
+        secure: process.env.EMAIL_SECURE === "true",
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS,
+        },
+
+        connectionTimeout: 20000,
+        socketTimeout: 30000,
+        // debug: true,
+      });
+
+      transporter.verify((error, success) => {
+        if (error) {
+          console.log("SMTP connection error:", error);
+        } else {
+          console.log("SMTP server is ready to take messages");
+        }
+      });
+
+      const emailPromises = employeeIds.map(async (employeeId) => {
+        const payslipResponse = await this.getEmployeePayslipData({
+          companyId,
+          employeeId,
+          payrollId,
+        });
+        const payslip = payslipResponse.data;
+        const employee = await Employee.findByPk(employeeId);
+        const company = await Company.findByPk(companyId);
+        if (!employee || !company) {
+          throw new Error(
+            `Employee or Company not found for employeeId ${employeeId}`
+          );
+        }
+
+        //payPeriodStartDate is a valid Date object
+        let startDate = payroll.payPeriodStartDate;
+        if (!(startDate instanceof Date) || isNaN(startDate)) {
+          startDate = new Date(payroll.payPeriodStartDate);
+        }
+        if (isNaN(startDate)) {
+          console.warn(
+            `Invalid date for payrollId ${payroll.id}: ${payroll.payPeriodStartDate}`
+          );
+          startDate = new Date();
+        }
+
+        const month = startDate.toLocaleString("default", { month: "long" });
+        const year = startDate.getFullYear();
+
+            const latexContent = `
+\\documentclass[a4paper]{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage{geometry}
+\\geometry{a4paper, margin=0.5in}
+\\usepackage{booktabs}
+\\usepackage{array}
+
+\\begin{document}
+
+\\centering
+\\textbf ${payslip.company} \\\\
+\\textbf{Payslip for the month of ${month} ${year}}
+
+\\vspace{0.5cm}
+
+\\begin{tabular}{p{2.5in} p{2in}}
+\\toprule
+\\textbf{Employee No.:} & ${payslip.staffNo} \\\\
+\\textbf{Name:} & ${payslip.fullName} \\\\
+\\textbf{Pay Date:} & ${payslip.payDate} \\\\
+\\textbf{Department:} & ${payslip.department} \\\\
+\\textbf{Job Title:} & ${payslip.jobTitle} \\\\
+\\textbf{Currency:} & ${payslip.currency} \\\\
+\\textbf{Kra Pin:} & ${payslip.kraPin} \\\\
+\\bottomrule
+\\end{tabular}
+
+\\vspace{0.5cm}
+
+\\textbf{Earnings:} \\\\
+\\begin{tabular}{lr}
+\\toprule
+
+Basic Salary & ${payslip.earnings["Basic Salary"]} \\\\
+${
+  Object.entries(payslip.otherEarnings)
+    .map(([name, amount]) => `${name} & ${amount || 0}`)
+    .join("\\\\\n") || ""
+} \\\\
+\\midrule
+\\textbf{Gross Pay} & ${payslip.grossPay} \\\\
+\\bottomrule
+\\end{tabular}
+
+\\vspace{0.5cm}
+
+\\textbf{Deductions:} \\\\
+\\begin{tabular}{lr}
+\\toprule
+
+${Object.entries(payslip.statutoryDeductions)
+  .map(([name, amount]) => `${name} & ${amount || 0}`)
+  .join("\\\\\n")} \\\\
+${
+  Object.entries(payslip.otherDeductions)
+    .map(([name, amount]) => `${name} & ${amount || 0}`)
+    .join("\\\\\n") || ""
+} \\\\
+\\midrule
+\\textbf{Total Deductions} & ${payslip.allDeductions} \\\\
+\\bottomrule
+\\end{tabular}
+
+\\vspace{0.5cm}
+
+\\textbf{Net Pay:} \\textbf{${payslip.netPay} ${payslip.currency}}
+
+\\vspace{0.5cm}
+
+\\textbf{PAYE Information:} \\\\
+\\begin{tabular}{lr}
+\\toprule
+\\textbf{Description} & \\textbf{Amount (${payslip.currency})} \\\\
+\\midrule
+\\textbf{Total Earnings} & ${payslip.payeInfo.totalEarnings} \\\\
+\\textbf{Less Pre-Tax Deductions:} & \\\\
+${
+  (payslip.payeInfo.lessPreTaxDeductions || [])
+    .map(({ label, amount }) => `${label} & ${amount || 0}`)
+    .join("\\\\\n") || "No pre-tax deductions"
+} \\\\
+\\midrule
+\\textbf{Taxable Pay} & ${payslip.payeInfo.taxablePay} \\\\
+\\midrule
+\\textbf{Gross Tax} & ${payslip.payeInfo.grossTax} \\\\
+\\textbf{Personal Relief} & ${payslip.payeInfo.personalRelief} \\\\
+\\textbf{Insurance Relief} & ${payslip.payeInfo.insuranceRelief} \\\\
+\\textbf{Housing Levy Relief} & ${payslip.payeInfo.housingLevyRelief} \\\\
+\\textbf{PAYE} & ${payslip.payeInfo.paye} \\\\
+\\bottomrule
+\\end{tabular}
+
+\\vspace{0.5cm}
+
+\\begin{tabular}{p{2.5in} p{2in}}
+\\toprule
+\\textbf{Created On:} & ${payslip.createdOn} \\\\
+\\textbf{CreatedBy:} & ${payslip.createdBy} \\\\
+\\bottomrule
+\\end{tabular}
+
+\\end{document}
+      `;
+
+        const latexFile = `payslip_${payslip.fullName}.tex`;
+        fs.writeFileSync(latexFile, latexContent);
+
+        // Generate PDF using latexmk
+        const pdfProcess = spawn("latexmk", ["-pdf", "-g", latexFile]);
+        let pdfOutput = "";
+        let pdfError = "";
+
+        pdfProcess.stdout.on("data", (data) => {
+          pdfOutput += data.toString();
+          console.log(`latexmk output: ${data}`);
+        });
+        pdfProcess.stderr.on("data", (data) => {
+          pdfError += data.toString();
+          console.log(`latexmk error: ${data}`);
+        });
+
+        const exitCode = await new Promise((resolve, reject) => {
+          pdfProcess.on("close", (code) => resolve(code));
+          pdfProcess.on("error", (err) => reject(err));
+        });
+
+        if (exitCode !== 0 || pdfError) {
+          throw new Error(
+            `LaTeX compilation failed for ${latexFile}: Exit code ${exitCode}, Error: ${pdfError}`
+          );
+        }
+
+        const pdfFile = `payslip_${payslip.fullName}.pdf`;
+        if (!fs.existsSync(pdfFile)) {
+          throw new Error(
+            `PDF file not generated: ${pdfFile}. Output: ${pdfOutput}, Error: ${pdfError}`
+          );
+        }
+
+        const stats = fs.statSync(pdfFile);
+        if (stats.size === 0) {
+          throw new Error(`PDF file is empty: ${pdfFile}`);
+        }
+
+        const mailOptions = {
+          from: `"Payroll System" <${process.env.EMAIL_USER}>`,
+          to: employee.workEmail || employee.personalEmail,
+          subject: `Payslip for ${month} ${year}`,
+          text: `Dear ${employee.firstName},\n\nPlease find your payslip attached.\n\nBest regards,\n${company.name}`,
+          attachments: [
+            {
+              filename: `payslip_${payslip.fullName}.pdf`,
+              path: pdfFile,
+            },
+          ],
+        };
+        console.log(`Sending payslip to ${mailOptions.to}`);
+        await transporter.sendMail(mailOptions);
+
+        // Clean up temporary files
+        fs.unlinkSync(latexFile);
+        fs.unlinkSync(pdfFile);
+      });
+
+      await Promise.all(emailPromises);
+
+      return res.status(200).json({
+        success: true,
+        message: "Payslips sent successfully",
+      });
+    } catch (error) {
+      console.error("Error sending payslips:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send payslips",
+        error: error.message,
+      });
+    }
+  }
+
+  async downloadPayslipsPDF(req, res) {
+    const { companyId } = req.params;
+    const { employeeIds, payrollId } = req.body;
+
+    let pdfFiles = []; // Declare outside try block for cleanup
+
+    try {
+      const payroll = await Payroll.findByPk(payrollId, {
+        where: { companyId },
+      });
+      if (!payroll) {
+        return res.status(404).json({ error: "Payroll batch not found" });
+      }
+
+      const pdfPromises = employeeIds.map(async (employeeId) => {
+        try {
+          const payslipResponse = await this.getEmployeePayslipData({
+            companyId,
+            employeeId,
+            payrollId,
+          });
+          const payslip = payslipResponse.data;
+          const employee = await Employee.findByPk(employeeId);
+
+          let startDate = payroll.payPeriodStartDate;
+          if (!(startDate instanceof Date) || isNaN(startDate)) {
+            startDate = new Date(payroll.payPeriodStartDate);
+          }
+          if (isNaN(startDate)) {
+            console.warn(
+              `Invalid date for payrollId ${payroll.id}: ${payroll.payPeriodStartDate}`
+            );
+            startDate = new Date();
+          }
+
+          const month = startDate.toLocaleString("default", { month: "long" });
+          const year = startDate.getFullYear();
+
+          // Validate and sanitize payslip data
+          const safePayslip = {
+            companyLogo: payslip.companyLogo,
+            company: payslip.company,
+            staffNo: payslip.staffNo,
+            fullName: payslip.fullName,
+            payDate: payslip.payDate,
+            department: payslip.department,
+            jobTitle: payslip.jobTitle,
+            currency: payslip.currency,
+            kraPin: payslip.kraPin,
+            earnings: payslip.earnings,
+            otherEarnings: payslip.otherEarnings || 0,
+            grossPay: payslip.grossPay,
+            statutoryDeductions: payslip.statutoryDeductions,
+            otherDeductions: payslip.otherDeductions || 0,
+            allDeductions: payslip.allDeductions,
+            netPay: payslip.netPay,
+            payeInfo: payslip.payeInfo,
+            createdOn: payslip.createdOn,
+            createdBy: payslip.createdBy,
+          };
+          console.log(
+            `Generating payslip for ${safePayslip.fullName} (${employeeId})...`
+          );
+
+             const latexContent = `
+\\documentclass[a4paper]{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage{geometry}
+\\geometry{a4paper, margin=0.5in}
+\\usepackage{booktabs}
+\\usepackage{array}
+
+\\begin{document}
+
+\\centering
+\\textbf ${payslip.company} \\\\
+\\textbf{Payslip for the month of ${month} ${year}}
+
+\\vspace{0.5cm}
+
+\\begin{tabular}{p{2.5in} p{2in}}
+\\toprule
+\\textbf{Employee No.:} & ${payslip.staffNo} \\\\
+\\textbf{Name:} & ${payslip.fullName} \\\\
+\\textbf{Pay Date:} & ${payslip.payDate} \\\\
+\\textbf{Department:} & ${payslip.department} \\\\
+\\textbf{Job Title:} & ${payslip.jobTitle} \\\\
+\\textbf{Currency:} & ${payslip.currency} \\\\
+\\textbf{Kra Pin:} & ${payslip.kraPin} \\\\
+\\bottomrule
+\\end{tabular}
+
+\\vspace{0.5cm}
+
+\\textbf{Earnings:} \\\\
+\\begin{tabular}{lr}
+\\toprule
+
+Basic Salary & ${payslip.earnings["Basic Salary"]} \\\\
+${
+  Object.entries(payslip.otherEarnings)
+    .map(([name, amount]) => `${name} & ${amount || 0}`)
+    .join("\\\\\n") || ""
+} \\\\
+\\midrule
+\\textbf{Gross Pay} & ${payslip.grossPay} \\\\
+\\bottomrule
+\\end{tabular}
+
+\\vspace{0.5cm}
+
+\\textbf{Deductions:} \\\\
+\\begin{tabular}{lr}
+\\toprule
+
+${Object.entries(payslip.statutoryDeductions)
+  .map(([name, amount]) => `${name} & ${amount || 0}`)
+  .join("\\\\\n")} \\\\
+${
+  Object.entries(payslip.otherDeductions)
+    .map(([name, amount]) => `${name} & ${amount || 0}`)
+    .join("\\\\\n") || ""
+} \\\\
+\\midrule
+\\textbf{Total Deductions} & ${payslip.allDeductions} \\\\
+\\bottomrule
+\\end{tabular}
+
+\\vspace{0.5cm}
+
+\\textbf{Net Pay:} \\textbf{${payslip.netPay} ${payslip.currency}}
+
+\\vspace{0.5cm}
+
+\\textbf{PAYE Information:} \\\\
+\\begin{tabular}{lr}
+\\toprule
+\\textbf{Description} & \\textbf{Amount (${payslip.currency})} \\\\
+\\midrule
+\\textbf{Total Earnings} & ${payslip.payeInfo.totalEarnings} \\\\
+\\textbf{Less Pre-Tax Deductions:} & \\\\
+${
+  (payslip.payeInfo.lessPreTaxDeductions || [])
+    .map(({ label, amount }) => `${label} & ${amount || 0}`)
+    .join("\\\\\n") || "No pre-tax deductions"
+} \\\\
+\\midrule
+\\textbf{Taxable Pay} & ${payslip.payeInfo.taxablePay} \\\\
+\\midrule
+\\textbf{Gross Tax} & ${payslip.payeInfo.grossTax} \\\\
+\\textbf{Personal Relief} & ${payslip.payeInfo.personalRelief} \\\\
+\\textbf{Insurance Relief} & ${payslip.payeInfo.insuranceRelief} \\\\
+\\textbf{Housing Levy Relief} & ${payslip.payeInfo.housingLevyRelief} \\\\
+\\textbf{PAYE} & ${payslip.payeInfo.paye} \\\\
+\\bottomrule
+\\end{tabular}
+
+\\vspace{0.5cm}
+
+\\begin{tabular}{p{2.5in} p{2in}}
+\\toprule
+\\textbf{Created On:} & ${payslip.createdOn} \\\\
+\\textbf{CreatedBy:} & ${payslip.createdBy} \\\\
+\\bottomrule
+\\end{tabular}
+
+\\end{document}
+      `;
+
+          const latexFile = `payslip_${safePayslip.fullName.replace(
+            /[^a-zA-Z0-9]/g,
+            "_"
+          )}.tex`;
+          await fsPromises.writeFile(latexFile, latexContent); // Use fsPromises for async write
+
+          const pdfProcess = spawn("latexmk", ["-pdf", latexFile]);
+          let pdfOutput = "";
+          let pdfError = "";
+
+          pdfProcess.stdout.on("data", (data) => {
+            pdfOutput += data.toString();
+            console.log(`latexmk output: ${data}`);
+          });
+          pdfProcess.stderr.on("data", (data) => {
+            pdfError += data.toString();
+            console.log(`latexmk error: ${data}`);
+          });
+
+          const exitCode = await new Promise((resolve, reject) => {
+            pdfProcess.on("close", (code) => resolve(code));
+            pdfProcess.on("error", (err) => reject(err));
+          });
+
+          if (exitCode !== 0 || pdfError) {
+            throw new Error(
+              `LaTeX compilation failed for ${latexFile}: Exit code ${exitCode}, Error: ${pdfError}`
+            );
+          }
+
+          const pdfFile = `payslip_${safePayslip.fullName.replace(
+            /[^a-zA-Z0-9]/g,
+            "_"
+          )}.pdf`;
+          if (!fs.existsSync(pdfFile)) {
+            throw new Error(
+              `PDF file not generated: ${pdfFile}. Output: ${pdfOutput}, Error: ${pdfError}`
+            );
+          }
+
+          return {
+            filename: pdfFile,
+            path: pdfFile,
+          };
+        } catch (error) {
+          console.error(`Error processing payslip for ${employeeId}:`, error);
+          throw error; // Re-throw to be caught by outer try-catch
+        }
+      });
+
+      pdfFiles = await Promise.all(pdfPromises);
+
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename=payslips_${companyId}_${payrollId}.zip`
+      );
+
+      const archive = archiver("zip", {
+        zlib: { level: 9 },
+      });
+      archive.pipe(res);
+
+      pdfFiles.forEach((file) => {
+        if (fs.existsSync(file.path)) {
+          archive.append(fs.createReadStream(file.path), {
+            name: file.filename,
+          });
+        } else {
+          console.error(`File not found: ${file.path}`);
+        }
+      });
+
+      console.log(
+        "Files added to archive:",
+        pdfFiles.map((f) => f.path)
+      );
+      archive.finalize();
+
+      archive.on("error", (err) => {
+        res.status(500).json({ error: err.message });
+        cleanupFiles(pdfFiles);
+      });
+
+      archive.on("finish", () => cleanupFiles(pdfFiles));
+    } catch (error) {
+      console.error("Error downloading payslips:", error);
+      cleanupFiles(pdfFiles);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to download payslips",
+        error: error.message,
+      });
+    }
+  }
 }
+
+function cleanupFiles(pdfFiles) {
+  if (pdfFiles) {
+    pdfFiles.forEach((file) => {
+      fs.unlink(file.path, (err) => {
+        if (err) console.error(`Error cleaning up ${file.path}:`, err);
+      });
+    });
+  }
+}
+
+function formatCurrency(amount) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
 module.exports = new PayrollController();

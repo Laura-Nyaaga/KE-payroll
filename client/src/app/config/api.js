@@ -6,8 +6,6 @@ export const API_TIMEOUT = 30000;
 export const ENDPOINTS = {
   LOGIN: '/auth/login',
   REGISTER: '/companies/register',
-  PAYSLIPS: '/payroll/payslips',
-  // Add verify endpoint
   VERIFY: '/auth/verify',
   LOGOUT: '/auth/logout'
 };
@@ -38,16 +36,9 @@ api.interceptors.response.use(
       }
     }
 
-    // if (error.response?.status === 403) {
-    //   console.error('Access forbidden:', error.response.data);
-    //   // For 403, you might want to show a message or redirect to an access denied page
-    //   // rather than always logging out, as 403 means "forbidden" (authenticated but not authorized)
-    //   // whereas 401 means "unauthorized" (not authenticated).
-    // }
-
     return Promise.reject(error);
   }
 );
 
-export default api; // Changed from API to api (lowercase) for consistency
+export default api;
 

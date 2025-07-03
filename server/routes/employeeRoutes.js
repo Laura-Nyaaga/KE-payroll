@@ -14,7 +14,7 @@ router.get('/details', employeeController.getAllEmployeeDetails);
 // Search Employee by Name or Staff No
 router.get('/search', employeeController.searchEmployee);
 // Get All Employees in a Particular Company
-router.get('/company/:companyId', authMiddleware, rbacMiddleware(['Admin', 'Hr', 'Accountant', 'SuperAdmin']), employeeController.getEmployeesByCompany);
+router.get('/company/:companyId', employeeController.getEmployeesByCompany);
 // Filter Employees Details in a Specific Company
 router.get('/company/:companyId/filter',authMiddleware, rbacMiddleware(['Admin', 'Hr', 'Accountant', 'SuperAdmin']), employeeController.filterEmployees);
 // Get All Employees (optional companyId as query param)

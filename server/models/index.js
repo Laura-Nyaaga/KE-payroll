@@ -2,17 +2,17 @@ const { sequelize, DataTypes }  = require('../config/db');
 
 const Company = require('./companyModel');
 const User = require('./userModel');
-const Employee = require('./employeesModel');
-const { Payroll, PayrollItem } = require('./payrollModel');
-const { Earnings, EmployeeEarnings } = require('./earningsModel');
-const AdvancePay = require('./advanceModel');
-const { Deduction, EmployeeDeduction} = require('./deductionsModel');
-const Payslip = require('./payslipsModel');
-const Project = require('./projectModel');
 const Department = require('./departmentModel');
 const Region = require('./regionModel');
 const JobTitle = require('./jobTitleModel');
+const Employee = require('./employeesModel');
+const Project = require('./projectModel');
+const AdvancePay = require('./advanceModel');
+const { Earnings, EmployeeEarnings } = require('./earningsModel');
+const { Deduction, EmployeeDeduction} = require('./deductionsModel');
+const { Payroll, PayrollItem } = require('./payrollModel');
 const PayrollStore = require('./payrollStoreModel');
+
 
 // MODELS ASSOCIATIONS
 
@@ -75,12 +75,6 @@ Company.hasMany(PayrollStore, { foreignKey: 'companyId', as: 'payrollHistory' })
 Employee.hasMany(AdvancePay, { foreignKey: 'employeeId', as: 'advancePays' });
 AdvancePay.belongsTo(Employee, { foreignKey: 'employeeId', as: 'employee' });
 
-// PAYSLIP ASSOCIATION
-Employee.hasMany(Payslip, { foreignKey: 'employeeId', as: 'payslips' });
-Payslip.belongsTo(Employee, { foreignKey: 'employeeId', as: 'employee' });
-Payroll.hasOne(Payslip, { foreignKey: 'payrollId', as: 'payslip' });
-Payslip.belongsTo(Payroll, { foreignKey: 'payrollId', as: 'payroll' });
-
 // JOB TITLE ASSOCIATION
 JobTitle.belongsTo(Company, { foreignKey: 'companyId', as: 'company' });
 Company.hasMany(JobTitle, { foreignKey: 'companyId', as: 'jobTitles' });
@@ -95,9 +89,9 @@ Department.hasMany(Employee, { foreignKey: 'departmentId', as: 'employees' });
 Project.belongsTo(Company, { foreignKey: 'companyId', as: 'company' });
 Company.hasMany(Project, { foreignKey: 'companyId', as: 'projects' });
 Project.hasMany(Employee, { foreignKey: 'employeeId', as: 'employees' });
-Project.belongsTo(Employee, { foreignKey: 'inchargeId', as: 'incharge' });
-Employee.hasMany(Project, { foreignKey: 'inchargeId', as: 'inchargeProjects' });
-Project.belongsToMany(Employee, { through: 'ProjectMembers', as: 'members', foreignKey: 'projectId'});
+// Project.belongsTo(Employee, { foreignKey: 'inchargeId', as: 'incharge' });
+// Employee.hasMany(Project, { foreignKey: 'inchargeId', as: 'inchargeProjects' });
+// Project.belongsToMany(Employee, { through: 'ProjectMembers', as: 'members', foreignKey: 'projectId'});
 
 
 // REGION ASSOCIATION
@@ -108,19 +102,18 @@ Region.hasMany(Employee, { foreignKey: 'employeeId', as: 'employees' });
 module.exports = {
   Company,
   User,
+  Department,
+  Region,
+  JobTitle,
   Employee,
-  Payroll,
-  PayrollItem,
+  Project,
   Earnings,
   EmployeeEarnings,
   EmployeeDeduction,
   AdvancePay,
   Deduction,
-  Payslip,
-  Project,
-  Department,
-  Region,
-  JobTitle,
+  Payroll,
+  PayrollItem,
   PayrollStore,
   sequelize, 
   DataTypes, 

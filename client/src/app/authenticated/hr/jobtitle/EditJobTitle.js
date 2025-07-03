@@ -46,9 +46,7 @@ export default function EditJobTitle({ job, onClose, onUpdate, onStatusChange })
       return;
     }
     
-    // Create updated job object based on the structure of the original job
     const updatedData = {
-      // Use the same property name that was in the original job object
       ...(job.title !== undefined ? { title } : {}),
       ...(job.name !== undefined ? { name: title } : {}),
       description
@@ -73,7 +71,7 @@ export default function EditJobTitle({ job, onClose, onUpdate, onStatusChange })
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={handleBackgroundClick}>
+    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50" onClick={handleBackgroundClick}>
       <div className="bg-white p-6 rounded-lg w-full max-w-xl" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold">Edit Job Title</h2>
@@ -99,12 +97,20 @@ export default function EditJobTitle({ job, onClose, onUpdate, onStatusChange })
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label className="block text-sm font-medium mb-1">Job Title</label>
-            <input
+           <input
               type="text"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                const inputValue = e.target.value;
+                const titleCaseValue = inputValue
+                  .toLowerCase()
+                  .replace(/(^|\s)\w/g, (letter) => letter.toUpperCase());
+                setTitle(titleCaseValue);
+              }}
               className="w-full p-2 border rounded"
               required
+              minLength={2}
+              maxLength={100}
             />
           </div>
           

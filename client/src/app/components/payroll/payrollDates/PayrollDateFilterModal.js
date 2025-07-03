@@ -1,28 +1,27 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
-import api, { BASE_URL } from "@/app/config/api"; // Ensure BASE_URL is imported here
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+import api, { BASE_URL } from "@/app/config/api";
 import { usePayrollContext } from "../context/PayrollContext";
-import { Button } from '../../ui/button';
-import { Input } from "../../ui/input"
-import { Label } from '../../ui/label' // Ensure Label is imported if not from ui/label
-import { Popover, PopoverTrigger, PopoverContent } from '../../ui/popover'
-import { toast } from 'react-hot-toast';
-import { CalendarIcon } from '@radix-ui/react-icons';
+import { Button } from "../../ui/button";
+import { CalendarIcon } from "@radix-ui/react-icons";
+import { Popover, PopoverTrigger, PopoverContent } from "../../ui/popover";
+import { toast } from "react-hot-toast";
+import { Label } from "../../ui/label";
 
-export default function PayrollDateFilter() {
+export default function PayrollModal() {
   const {
     payrollDates,
     setPayrollDates,
     paymentDate,
     setPaymentDate,
-    fetchReadOnlyStatus,
     setPayrollId,
     selectedStatus,
     generatePreview,
-    loading // Overall loading state from context
+    companyId,
+    fetchPayrollData,
   } = usePayrollContext();
 
   const [showModal, setShowModal] = useState(false);
@@ -30,270 +29,255 @@ export default function PayrollDateFilter() {
     from: null,
     to: null,
     paymentDate: null,
-    totalDays: 0
+    totalDays: 0,
   });
   const [existingRanges, setExistingRanges] = useState([]);
-  const [loadingRanges, setLoadingRanges] = useState(false); // Loading state for fetching existing ranges
-  const [isSubmitting, setIsSubmitting] = useState(false); // Loading state for preview generation
-  const [isOpen, setIsOpen] = useState(false); // State for the main popover dropdown
+  const [loadingRanges, setLoadingRanges] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
   const [selectedRangeText, setSelectedRangeText] = useState("Select Payroll Date Range");
   const [selectedPayrollId, setSelectedPayrollId] = useState(null);
 
-  // Constants for date range logic
+  // Stable references to prevent infinite loops
+  const fetchPayrollDataRef = useRef(fetchPayrollData);
+  const lastFetchedPayrollId = useRef(null);
+  const isInitialized = useRef(false);
+
   const MIN_PAY_PERIOD_DAYS = 25;
   const MAX_PAY_PERIOD_DAYS = 30;
-  const MAX_PAYMENT_DAYS_AHEAD = 7; // Payment date not more than 7 days from end pay period
+  const MAX_PAYMENT_DAYS_AHEAD = 7;
 
-  const formatDateDisplay = (dateString) => {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
-  };
+  // Update ref when fetchPayrollData changes
+  useEffect(() => {
+    fetchPayrollDataRef.current = fetchPayrollData;
+  }, [fetchPayrollData]);
 
-  const fetchPayrollDateRanges = useCallback(async () => {
-    setLoadingRanges(true);
-    const companyId = localStorage.getItem('companyId'); // Get companyId dynamically
+  // Initialize from localStorage
+  useEffect(() => {
+    if (isInitialized.current) return;
 
-    if (!companyId) {
-      setLoadingRanges(false);
-      toast.error("Company ID not found. Please log in to fetch payroll ranges.");
-      setExistingRanges([]);
-      return;
+    const storedPayrollId = localStorage.getItem("payrollId");
+    const storedRangeText = localStorage.getItem("selectedRangeText");
+
+    if (storedPayrollId && storedPayrollId !== "null" && storedRangeText) {
+      setSelectedPayrollId(storedPayrollId);
+      setSelectedRangeText(storedRangeText);
     }
 
+    isInitialized.current = true;
+  }, []);
+
+  const formatDateDisplay = useCallback((dateString) => {
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  }, []);
+
+  const fetchPayrollDateRanges = useCallback(async () => {
+    if (!companyId) return;
+
+    setLoadingRanges(true);
     try {
-      // Use the 'api' instance for authenticated requests
       const response = await api.get(`${BASE_URL}/payrolls/company/${companyId}/date/details`);
       if (response.data?.success) {
-        setExistingRanges(response.data.data);
-      } else {
-        setExistingRanges([]);
+        const data = response.data.data;
+        setExistingRanges(data);
+
+        // Validate stored selection
+        const storedPayrollId = localStorage.getItem("payrollId");
+        if (storedPayrollId && storedPayrollId !== "null") {
+          const match = data.find((r) => r.payrollId === storedPayrollId);
+          if (match) {
+            const from = new Date(match.payPeriodStartDate);
+            const to = new Date(match.payPeriodEndDate);
+            const rangeText = `${formatDateDisplay(from)} - ${formatDateDisplay(to)}`;
+            setSelectedRangeText(rangeText);
+            setSelectedPayrollId(storedPayrollId);
+            localStorage.setItem("selectedRangeText", rangeText);
+          } else {
+            localStorage.removeItem("payrollId");
+            localStorage.removeItem("selectedRangeText");
+            setSelectedRangeText("Select Payroll Date Range");
+            setSelectedPayrollId(null);
+          }
+        }
       }
-    } catch (error) {
-      console.error("Error fetching payroll date ranges:", error);
-      setExistingRanges([]);
-      toast.error(error.response?.data?.message || "Failed to fetch payroll date ranges");
+    } catch (err) {
+      console.error(err);
+      toast.error("Error fetching payroll ranges");
     } finally {
       setLoadingRanges(false);
     }
-  }, []); // No dependencies needed as companyId is fetched internally
+  }, [companyId, formatDateDisplay]);
 
+  // Fetch ranges when companyId changes
   useEffect(() => {
-    fetchPayrollDateRanges();
-  }, [fetchPayrollDateRanges]);
+    if (companyId) {
+      fetchPayrollDateRanges();
+    }
+  }, [companyId, fetchPayrollDateRanges]);
+
+  // Fetch payroll data when selectedPayrollId changes
+  useEffect(() => {
+    if (
+      selectedPayrollId &&
+      selectedPayrollId !== "null" &&
+      selectedStatus &&
+      companyId &&
+      lastFetchedPayrollId.current !== selectedPayrollId
+    ) {
+      lastFetchedPayrollId.current = selectedPayrollId;
+      fetchPayrollDataRef.current?.();
+    }
+  }, [selectedPayrollId, selectedStatus, companyId]);
+
+  // Sync context with selected range
+  useEffect(() => {
+    if (selectedPayrollId && selectedPayrollId !== "null" && existingRanges.length > 0) {
+      const found = existingRanges.find((r) => r.payrollId === selectedPayrollId);
+      if (found) {
+        const from = new Date(found.payPeriodStartDate);
+        const to = new Date(found.payPeriodEndDate);
+        const pay = new Date(found.paymentDate);
+        const rangeText = `${formatDateDisplay(from)} - ${formatDateDisplay(to)}`;
+
+        console.log("This the form date", from, to, pay);
+
+        setPayrollDates({ from, to, totalDays: calculateDays(from, to) });
+        setPaymentDate(pay);
+        setPayrollId(selectedPayrollId);
+        if (selectedRangeText !== rangeText) {
+          setSelectedRangeText(rangeText);
+          localStorage.setItem("selectedRangeText", rangeText);
+        }
+      }
+    }
+  }, [selectedPayrollId, existingRanges, setPayrollDates, setPaymentDate, setPayrollId, formatDateDisplay, selectedRangeText]);
 
   const calculateDays = (from, to) => {
     if (!from || !to) return 0;
-    const msPerDay = 1000 * 60 * 60 * 24;
-    // +1 to include both start and end days
-    return Math.ceil((to.getTime() - from.getTime()) / msPerDay) + 1;
+    return Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)) + 1;
   };
 
-  const handleDateChange = (dateType, date) => {
-    let from = payrollDateModal.from;
-    let to = payrollDateModal.to;
-    let paymentDate = payrollDateModal.paymentDate;
+  const handleSubmit = async () => {
+    const { from, to, paymentDate } = payrollDateModal;
+    if (!from || !to || !paymentDate) return toast.error("All dates required");
 
-    if (dateType === 'from') {
-      from = date;
-      // If new 'from' date invalidates 'to' date, reset 'to' and 'paymentDate'
-      if (to && from && (from > to || calculateDays(from, to) > MAX_PAY_PERIOD_DAYS || calculateDays(from, to) < MIN_PAY_PERIOD_DAYS)) {
-        to = null;
-        paymentDate = null;
-      }
-      // If payment date is before new 'from' date, reset it
-      if (paymentDate && from && paymentDate < from) {
-        paymentDate = null;
-      }
-    } else if (dateType === 'to') {
-      to = date;
-      // If new 'to' date invalidates 'paymentDate', reset 'paymentDate'
-      if (paymentDate && to && (paymentDate < to || calculateDays(to, paymentDate) > MAX_PAYMENT_DAYS_AHEAD)) {
-        paymentDate = null;
-      }
-    } else if (dateType === 'paymentDate') {
-      paymentDate = date;
+    const rangeDays = calculateDays(from, to);
+    if (rangeDays < MIN_PAY_PERIOD_DAYS || rangeDays > MAX_PAY_PERIOD_DAYS) {
+      return toast.error(`Range must be between ${MIN_PAY_PERIOD_DAYS} and ${MAX_PAY_PERIOD_DAYS} days`);
     }
 
-    const days = calculateDays(from, to);
-    setPayrollDateModal(prev => ({
-      ...prev,
-      [dateType]: date,
-      totalDays: days > 0 ? days : 0,
-      from: from,
-      to: to,
-      paymentDate: paymentDate,
-    }));
-  };
-
-  const handleSubmit = async (e) => {
-    if (e && e.preventDefault) e.preventDefault();
-    if (e && e.stopPropagation) e.stopPropagation();
-
-    // Frontend validation
-    if (!payrollDateModal.from || !payrollDateModal.to || !payrollDateModal.paymentDate) {
-      toast.error('Please select start, end, and payment dates.');
-      return;
+    const paymentGap = calculateDays(to, paymentDate);
+    if (paymentGap > MAX_PAYMENT_DAYS_AHEAD || paymentDate < to) {
+      return toast.error(`Payment must be within ${MAX_PAYMENT_DAYS_AHEAD} days after end date`);
     }
 
-    const daysRange = calculateDays(payrollDateModal.from, payrollDateModal.to);
-    if (payrollDateModal.from > payrollDateModal.to || daysRange < MIN_PAY_PERIOD_DAYS || daysRange > MAX_PAY_PERIOD_DAYS) {
-      toast.error(`Payroll period must be between ${MIN_PAY_PERIOD_DAYS} and ${MAX_PAY_PERIOD_DAYS} days.`);
-      return;
-    }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const currentMonthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-    // Check if the 'to' date is in a future month relative to the current month
-    // This simple check prevents generating payroll for months beyond the current one.
-    if (payrollDateModal.to > currentMonthEnd) {
-      toast.error('You cannot generate payroll for future months. Please select dates within the current or past month.');
-      return;
-    }
-
-    const paymentDaysDiff = calculateDays(payrollDateModal.to, payrollDateModal.paymentDate);
-    if (payrollDateModal.paymentDate < payrollDateModal.to || paymentDaysDiff > MAX_PAYMENT_DAYS_AHEAD) {
-      toast.error(`Payment date must be within ${MAX_PAYMENT_DAYS_AHEAD} days of the pay period end date, and not before the end date.`);
-      return;
-    }
-
-    setIsSubmitting(true);
+  const formatLocalDate = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
     try {
-      const result = await generatePreview({
-        payPeriodStartDate: payrollDateModal.from,
-        payPeriodEndDate: payrollDateModal.to,
-        paymentDate: payrollDateModal.paymentDate,
-      });
+      setIsSubmitting(true);
+    const payload = {
+  payPeriodStartDate: formatLocalDate(from),
+  payPeriodEndDate: formatLocalDate(to),
+  paymentDate: formatLocalDate(paymentDate),
+};
+      const result = await generatePreview(payload);
 
-      if (result && result.success) {
-        const rangeText = `${formatDateDisplay(payrollDateModal.from)} - ${formatDateDisplay(payrollDateModal.to)}`;
+      console.log("This is my payload:", payload)
+
+      if (result.success) {
+        const rangeText = `${formatDateDisplay(from)} - ${formatDateDisplay(to)}`;
+        localStorage.setItem("selectedRangeText", rangeText);
+        localStorage.setItem("payrollId", result.payrollId);
         setSelectedRangeText(rangeText);
-        setPayrollDates({
-          from: payrollDateModal.from,
-          to: payrollDateModal.to,
-          totalDays: payrollDateModal.totalDays
-        });
-        setPaymentDate(payrollDateModal.paymentDate);
-        await fetchPayrollDateRanges(); // Refresh existing ranges
-        toast.success("Payroll dates set successfully and preview generated.");
+        setSelectedPayrollId(result.payrollId);
+        setPayrollDates({ from, to, totalDays: rangeDays });
+        setPaymentDate(paymentDate);
+        setPayrollId(result.payrollId);
+
+        lastFetchedPayrollId.current = null;
+
+        await fetchPayrollDateRanges();
+        toast.success("Payroll preview generated.");
         setShowModal(false);
         setIsOpen(false);
-      } else {
-        // If generatePreview failed but didn't throw, it returned success: false
-        // The error toast is handled by generatePreview itself, no need for another here.
-        // Keep modal open or close based on desired UX for non-throwing errors.
-        // For now, it will stay open as `generatePreview` is expected to throw on failure.
       }
-    } catch (error) {
-      // Error toast is already handled by generatePreview's catch block.
-      // This catch is for any unexpected errors during the process.
-      console.error("Error during payroll generation process (caught in PayrollDateFilter):", error);
-      toast.error(error.message || "An unexpected error occurred during payroll generation.");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to generate payroll");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleSelectExistingRange = (payrollIdFromSelection) => {
-    if (payrollIdFromSelection === 'new') {
-      setPayrollDateModal({
-        from: null,
-        to: null,
-        paymentDate: null,
-        totalDays: 0
-      });
-      setShowModal(true); // Open the modal for new range
-      setIsOpen(false); // Close the popover
-      setSelectedPayrollId(null);
+  const handleSelectExistingRange = useCallback((payrollId) => {
+    if (!payrollId || payrollId === "null") return;
+
+    if (payrollId === "new") {
+      localStorage.removeItem("payrollId");
+      localStorage.removeItem("selectedRangeText");
       setSelectedRangeText("Select Payroll Date Range");
+      setSelectedPayrollId(null);
+      setShowModal(true);
+      setIsOpen(false);
       return;
     }
 
-    const selectedRange = existingRanges.find(range => range.payrollId === payrollIdFromSelection);
-    if (selectedRange) {
-      const fromDate = new Date(selectedRange.payPeriodStartDate);
-      const toDate = new Date(selectedRange.payPeriodEndDate);
-      const paymentDate = new Date(selectedRange.paymentDate);
+    const found = existingRanges.find((r) => r.payrollId === payrollId);
+    if (found) {
+      const from = new Date(found.payPeriodStartDate);
+      const to = new Date(found.payPeriodEndDate);
+      const pay = new Date(found.paymentDate);
+      const label = `${formatDateDisplay(from)} - ${formatDateDisplay(to)}`;
 
-      const rangeText = `${formatDateDisplay(selectedRange.payPeriodStartDate)} - ${formatDateDisplay(selectedRange.payPeriodEndDate)}`;
-
-      setSelectedRangeText(rangeText);
-      setSelectedPayrollId(payrollIdFromSelection); // Set the selected payroll ID
-
-      setPayrollDates({
-        from: fromDate,
-        to: toDate,
-        totalDays: calculateDays(fromDate, toDate)
-      });
-      setPaymentDate(paymentDate);
-      setPayrollId(payrollIdFromSelection); // Update payrollId in context
-
-      setIsOpen(false); // Close the popover
-      // fetchReadOnlyStatus now internally gets companyId from localStorage
-      fetchReadOnlyStatus(selectedStatus, payrollIdFromSelection);
+      localStorage.setItem("payrollId", payrollId);
+      localStorage.setItem("selectedRangeText", label);
+      setSelectedRangeText(label);
+      setSelectedPayrollId(payrollId);
+      setPayrollDates({ from, to, totalDays: calculateDays(from, to) });
+      setPaymentDate(pay);
+      setPayrollId(payrollId);
+      lastFetchedPayrollId.current = null;
     }
-  };
+    setIsOpen(false);
+  }, [existingRanges, setPayrollDates, setPaymentDate, setPayrollId, formatDateDisplay]);
 
-  // Helper function to get today's date for highlighting
-  const today = new Date();
-  today.setHours(0,0,0,0); // Normalize to start of day
-
-  // --- Datepicker filter functions ---
-
-  // Filter for "To" DatePicker
   const filterToDate = (date) => {
-    if (!payrollDateModal.from) {
-      // If 'from' date is not selected, only allow dates in the current month or future (up to MAX_PAY_PERIOD_DAYS from current date)
-      const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-      const currentMonthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0); // End of current month
-      const maxPossibleToDate = new Date(today.getTime());
-      maxPossibleToDate.setDate(today.getDate() + MAX_PAY_PERIOD_DAYS -1);
-
-      return date >= currentMonthStart && date <= currentMonthEnd && date <= maxPossibleToDate;
-    }
-
-    const maxEndDate = new Date(payrollDateModal.from.getTime());
-    maxEndDate.setDate(payrollDateModal.from.getDate() + MAX_PAY_PERIOD_DAYS -1 ); // -1 because calculateDays adds 1
-
-    const minEndDate = new Date(payrollDateModal.from.getTime());
-    minEndDate.setDate(payrollDateModal.from.getDate() + MIN_PAY_PERIOD_DAYS -1 ); // -1 because calculateDays adds 1
-
-    const currentMonthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-
-    // Date must be:
-    // 1. On or after 'from' date
-    // 2. Within MIN_PAY_PERIOD_DAYS and MAX_PAY_PERIOD_DAYS from 'from' date
-    // 3. Not after the end of the current month
-    return date >= payrollDateModal.from &&
-           date >= minEndDate && // Ensure at least min days
-           date <= maxEndDate && // Ensure not more than max days
-           date <= currentMonthEnd; // Ensure not in future month
+    if (!payrollDateModal.from) return true;
+    const minDate = new Date(payrollDateModal.from);
+    minDate.setDate(minDate.getDate() + MIN_PAY_PERIOD_DAYS - 1);
+    const maxDate = new Date(payrollDateModal.from);
+    maxDate.setDate(maxDate.getDate() + MAX_PAY_PERIOD_DAYS - 1);
+    return date >= minDate && date <= maxDate;
   };
 
-  // Filter for "Payment Date" DatePicker
   const filterPaymentDate = (date) => {
-    if (!payrollDateModal.to) {
-      // If 'to' date is not selected, restrict to current month and not in past
-      const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-      return date >= currentMonthStart;
-    }
-
-    const minPaymentDate = new Date(payrollDateModal.to.getTime());
-    const maxPaymentDate = new Date(payrollDateModal.to.getTime());
-    maxPaymentDate.setDate(payrollDateModal.to.getDate() + MAX_PAYMENT_DAYS_AHEAD);
-
-    // Payment date must be:
-    // 1. On or after 'to' date
-    // 2. Not more than MAX_PAYMENT_DAYS_AHEAD from 'to' date
-    return date >= minPaymentDate && date <= maxPaymentDate;
+    if (!payrollDateModal.to) return true;
+    const min = new Date(payrollDateModal.to);
+    const max = new Date(payrollDateModal.to);
+    max.setDate(max.getDate() + MAX_PAYMENT_DAYS_AHEAD);
+    return date >= min && date <= max;
   };
 
+  const handleCloseModal = () => {
+    setShowModal(false);
+    setPayrollDateModal({
+      from: null,
+      to: null,
+      paymentDate: null,
+      totalDays: 0,
+    });
+  };
 
   return (
     <div className="flex gap-4 items-center">
@@ -303,158 +287,104 @@ export default function PayrollDateFilter() {
             variant="outline"
             className="w-[280px] justify-start text-left font-normal"
             onClick={() => setIsOpen(!isOpen)}
-            disabled={loading || isSubmitting || loadingRanges} // Disable if any loading is happening
           >
             <CalendarIcon className="mr-2 h-4 w-4" />
             {selectedRangeText}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
-          <div className="p-2">
+          <div className="p-2 space-y-2">
             {loadingRanges ? (
-              <div className="p-2 text-sm text-gray-600">Loading payroll ranges...</div>
+              <div className="text-sm p-2">Loading ranges...</div>
             ) : (
-              <div className="space-y-2">
-                {existingRanges.length > 0 ? (
-                  existingRanges.map(range => (
+              <>
+                {existingRanges.map((range) => {
+                  const label = `${formatDateDisplay(range.payPeriodStartDate)} - ${formatDateDisplay(range.payPeriodEndDate)}`;
+                  return (
                     <div
                       key={range.payrollId}
-                      className={`p-2 text-sm rounded hover:bg-gray-100 cursor-pointer ${selectedPayrollId === range.payrollId ? 'bg-blue-50 font-medium text-blue-700' : 'text-gray-800'}`}
+                      className={`cursor-pointer text-sm p-2 rounded hover:bg-gray-100 ${
+                        selectedPayrollId === range.payrollId ? "bg-blue-100 font-semibold border border-blue-300" : ""
+                      }`}
                       onClick={() => handleSelectExistingRange(range.payrollId)}
                     >
-                      {formatDateDisplay(range.payPeriodStartDate)} - {formatDateDisplay(range.payPeriodEndDate)}
+                      {label}
                     </div>
-                  ))
-                ) : (
-                  <div className="p-2 text-sm text-gray-500">No existing payroll ranges found.</div>
-                )}
+                  );
+                })}
                 <div
-                  className="p-2 text-sm rounded hover:bg-gray-100 cursor-pointer font-medium text-blue-600 border-t border-gray-200 mt-2 pt-2"
-                  onClick={() => handleSelectExistingRange('new')}
+                  className="text-blue-600 cursor-pointer border-t pt-2 mt-2 text-sm hover:bg-blue-50 p-2 rounded"
+                  onClick={() => handleSelectExistingRange("new")}
                 >
-                  + Set New Payroll Date Range
+                  + Set New Payroll Range
                 </div>
-              </div>
+              </>
             )}
           </div>
         </PopoverContent>
       </Popover>
 
-      {/* MODAL IMPLEMENTATION: Conditional rendering for the modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          {/* Overlay */}
-          <div
-            className="fixed inset-0 bg-black/50"
-            onClick={() => {
-              if (!isSubmitting) setShowModal(false);
-              else toast.error("Please wait until submission completes.");
-            }}
-          />
-
-          {/* Modal Content */}
-          <div className="bg-white rounded-md shadow-lg p-6 max-w-md w-full relative">
-            {/* Close button */}
+        <div className="fixed inset-0 bg-black/40 z-50 flex justify-center items-center">
+          <div className="bg-white p-6 rounded shadow-md w-[400px] relative">
             <button
-              onClick={() => {
-                if (!isSubmitting) setShowModal(false);
-                else toast.error("Please wait until submission completes.");
-              }}
-              className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 text-2xl"
-              disabled={isSubmitting}
+              onClick={handleCloseModal}
+              className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
             >
-              &times;
+              ×
             </button>
-
-            {/* Modal Header */}
-            <h2 className="text-xl font-semibold mb-2 text-gray-800">Set Payroll Date Range</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              Select the start, end, and payment dates for this payroll period.
-            </p>
-
-            {/* Modal Body (your form content) */}
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="from" className="text-right text-gray-700">
-                  From
-                </Label>
+            <h2 className="text-lg font-semibold mb-4">Set Payroll Range</h2>
+            <div className="grid gap-4">
+              <div>
+                <Label>From</Label>
                 <DatePicker
                   selected={payrollDateModal.from}
-                  onChange={(date) => handleDateChange('from', date)}
-                  selectsStart
-                  startDate={payrollDateModal.from}
-                  endDate={payrollDateModal.to}
-                  className="col-span-3 border border-gray-300 rounded-md px-3 py-2 w-full focus:ring-blue-500 focus:border-blue-500 text-black"
+                  onChange={(date) => setPayrollDateModal((p) => ({ ...p, from: date, to: null, paymentDate: null }))}
+                  className="border px-2 py-1 w-full rounded"
                   dateFormat="yyyy-MM-dd"
-                  placeholderText="YYYY-MM-DD"
-                  required
-                  // Max date for 'from' can be 'to' date, or if 'to' is not set, end of current month
-                  maxDate={payrollDateModal.to ? new Date(payrollDateModal.to.getTime()) : new Date(today.getFullYear(), today.getMonth() + 1, 0)}
-                  // Allow selecting dates up to the end of the current month (for 'from')
-                  filterDate={(date) => date <= new Date(today.getFullYear(), today.getMonth() + 1, 0)}
-                  highlightDates={[today]}
+                  placeholderText="Select start date"
                 />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="to" className="text-right text-gray-700">
-                  To
-                </Label>
+              <div>
+                <Label>To</Label>
                 <DatePicker
                   selected={payrollDateModal.to}
-                  onChange={(date) => handleDateChange('to', date)}
-                  selectsEnd
-                  startDate={payrollDateModal.from}
-                  endDate={payrollDateModal.to}
-                  minDate={payrollDateModal.from} // Must be after or same as 'from' date
-                  className="col-span-3 border border-gray-300 rounded-md px-3 py-2 w-full focus:ring-blue-500 focus:border-blue-500 text-black"
+                  onChange={(date) => setPayrollDateModal((p) => ({ ...p, to: date, paymentDate: null }))}
+                  className="border px-2 py-1 w-full rounded"
                   dateFormat="yyyy-MM-dd"
-                  placeholderText="YYYY-MM-DD"
-                  required
-                  showMonthDropdown
-                  showYearDropdown
-                  dropdownMode="select"
-                  filterDate={filterToDate} // Apply custom filter
-                  highlightDates={[today]}
+                  filterDate={filterToDate}
+                  disabled={!payrollDateModal.from}
+                  placeholderText="Select end date"
                 />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="paymentDate" className="text-right text-gray-700">
-                  Payment Date
-                </Label>
+              <div>
+                <Label>Payment Date</Label>
                 <DatePicker
                   selected={payrollDateModal.paymentDate}
-                  onChange={(date) => handleDateChange('paymentDate', date)}
-                  minDate={payrollDateModal.to || new Date()} // Cannot be before 'to' date, or current date if 'to' is not set
-                  className="col-span-3 border border-gray-300 rounded-md px-3 py-2 w-full focus:ring-blue-500 focus:border-blue-500 text-black"
+                  onChange={(date) => setPayrollDateModal((p) => ({ ...p, paymentDate: date }))}
+                  className="border px-2 py-1 w-full rounded"
                   dateFormat="yyyy-MM-dd"
-                  placeholderText="YYYY-MM-DD"
-                  required
-                  filterDate={filterPaymentDate} // Apply custom filter
-                  highlightDates={[today]}
+                  filterDate={filterPaymentDate}
+                  disabled={!payrollDateModal.to}
+                  placeholderText="Select payment date"
                 />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label className="text-right text-gray-700">
-                  Total Days
-                </Label>
-                <Input
-                  readOnly
-                  value={payrollDateModal.totalDays}
-                  className="col-span-3 bg-gray-100 border border-gray-300 text-black"
-                />
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleSubmit}
+                  disabled={isSubmitting || !payrollDateModal.from || !payrollDateModal.to || !payrollDateModal.paymentDate}
+                  className="flex-1"
+                >
+                  {isSubmitting ? "Generating..." : "Generate Preview"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleCloseModal}
+                  disabled={isSubmitting}
+                >
+                  Cancel
+                </Button>
               </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="flex justify-end gap-2 mt-6">
-              <Button
-                type="button"
-                className="bg-green-600 text-white hover:bg-green-700 px-4 py-2 rounded-md shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-                disabled={isSubmitting || !payrollDateModal.from || !payrollDateModal.to || !payrollDateModal.paymentDate || payrollDateModal.totalDays < MIN_PAY_PERIOD_DAYS || payrollDateModal.totalDays > MAX_PAY_PERIOD_DAYS || calculateDays(payrollDateModal.to, payrollDateModal.paymentDate) > MAX_PAYMENT_DAYS_AHEAD || payrollDateModal.paymentDate < payrollDateModal.to}
-                onClick={handleSubmit}
-              >
-                {isSubmitting ? "Generating..." : "Generate Preview"}
-              </Button>
             </div>
           </div>
         </div>
@@ -462,20 +392,3 @@ export default function PayrollDateFilter() {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

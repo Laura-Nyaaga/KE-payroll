@@ -215,7 +215,7 @@ export default function JobTitlePage() {
         <h2 className="text-2xl font-semibold text-gray-700">Job Titles Management</h2>
         <div className="flex items-center gap-4">
           {/* Export Job Titles Button */}
-          <button
+          {/* <button
             className="flex items-center text-blue-600 hover:text-blue-800 transition-colors duration-200 p-2 rounded-md hover:bg-blue-100"
             onClick={() => {
               // Implement bulk export functionality here
@@ -230,7 +230,7 @@ export default function JobTitlePage() {
               <line x1="12" y1="15" x2="12" y2="3"></line>
             </svg>
             <span className="ml-2 font-medium">Export</span>
-          </button>
+          </button> */}
 
           {/* Add Job Title Button */}
           <button

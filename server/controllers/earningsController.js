@@ -63,7 +63,7 @@ exports.getAllCompanyEarnings = async (req, res) => {
             attributes: [
               'id', 'earningsType', 
               'calculationMethod', 'isTaxable', 
-              'status', 'createdAt', 'updatedAt'
+              'status', 'mode', 'createdAt', 'updatedAt'
             ]
         });
 
@@ -153,7 +153,7 @@ exports.updateEarnings = async (req, res) => {
     try {
       const { id } = req.params;
       const {
-        // calculationMethod,
+        calculationMethod,
         mode,
         isTaxable,
         status,
@@ -164,13 +164,13 @@ exports.updateEarnings = async (req, res) => {
         return res.status(400).json({ message: 'Invalid calculation method' });
       }
   
-      if (calculationMethod === 'percentage' && mode !== 'monthly') {
-        await transaction.rollback();
-        return res.status(400).json({ message: 'Percentage-based earnings must have "monthly" mode.' });
-      }
+      // if (calculationMethod === 'percentage' && mode !== 'monthly') {
+      //   await transaction.rollback();
+      //   return res.status(400).json({ message: 'Percentage-based earnings must have "monthly" mode.' });
+      // }
   
       const [updatedRows] = await Earnings.update({
-        // calculationMethod,
+        calculationMethod,
         mode,
         isTaxable,
         status
@@ -429,7 +429,6 @@ exports.updateEmployeeSpecificEarning = async (req, res) => {
   }
 };
 
-  
 // Delete Specific Earnings of an Employee (Soft Delete)
 exports.deleteEmployeeSpecificEarning = async (req, res) => {
     try {
@@ -547,72 +546,130 @@ exports.getAllSystemEarnings = async (req, res) => {
     }
 };
 
-// Get All Employees with Earnings for a Specific Company
 exports.getAllEmployeesWithEarningsByCompany = async (req, res) => {
-    try {
-        const { companyId } = req.params;
+  try {
+    const { companyId } = req.params;
+    const { startDate, endDate } = req.query;
 
-        if (!companyId) {
-            return res.status(400).json({ message: 'companyId path parameter is required' });
-        }
+    // Validate and parse date inputs if provided
+    const isValidDate = (date) => date instanceof Date && !isNaN(date);
+    let employmentDateFilter = {};
+    let earningsDateFilter = {};
 
-        const employees = await Employee.findAll({
-            where: {
-                companyId,
-                deletedAt: null
-            },
-            include: [{
-                model: EmployeeEarnings,
-                as: 'employeeEarnings',
-                where: {
-                    status: 'active',
-                    [Op.or]: [
-                        { endDate: null },
-                        { endDate: { [Op.gte]: new Date() }}
-                    ]
-                },
-                required: false, // Include employees even if they have no earnings
-                include: [{
-                    model: Earnings,
-                    as: 'earnings',
-                    where: {
-                        companyId,
-                        deletedAt: null
-                    },
-                    attributes: ['id', 'earningsType', 
-                      'calculationMethod', 'isTaxable', 
-                      'status', 'mode'
-                    ]
-                }],
-                attributes: ['id', 'customMonthlyAmount', 'customPercentage', 
-                  'customNumberOfHours', 'customNumberOfDays', 
-                  'customNumberOfWeeks', 'customHourlyRate', 'customDailyRate', 
-                  'customWeeklyRate','calculatedAmount', 'effectiveDate', 
-                  'endDate'
-                ]
-            }],
-            attributes: ['id', 'firstName', 'lastName', 'staffNo', 'basicSalary']
-        });
-        // Filter out earnings that might be null if required=false was used
-        const result = employees.map(employee => {
-            const employeeData = employee.get({ plain: true });
-            employeeData.employeeEarnings = employeeData.employeeEarnings.filter(
-                ee => ee.earnings !== null
-            );
-            return employeeData;
-        });
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
 
-        res.status(200).json(result);
-    } catch (error) {
-        console.error('Error fetching employees with earnings by company:', error);
-        res.status(500).json({ 
-            message: 'Failed to fetch employees with earnings by company', 
-            error: error.message 
-        });
+      if (!isValidDate(start) || !isValidDate(end)) {
+        return res.status(400).json({ message: "Invalid date format. Use YYYY-MM-DD." });
+      }
+
+      if (start > end) {
+        return res.status(400).json({ message: "startDate cannot be after endDate." });
+      }
+
+      // Apply date filters for employmentDate and effectiveDate
+      employmentDateFilter = {
+        [Op.gte]: start,
+        [Op.lte]: end,
+      };
+      earningsDateFilter = {
+        effectiveDate: {
+          [Op.gte]: start,
+          [Op.lte]: end,
+        },
+      };
     }
+
+    // Build the query
+    const employees = await Employee.findAll({
+      where: {
+        deletedAt: null,
+        companyId,
+        // Apply employmentDate filter only if dates are provided
+        ...(Object.keys(employmentDateFilter).length > 0 && { employmentDate: employmentDateFilter }),
+      },
+      attributes: [
+        "id",
+        "firstName",
+        "lastName",
+        "staffNo",
+        "basicSalary",
+      ],
+      include: [
+        {
+          model: EmployeeEarnings,
+          as: 'employeeEarnings',
+          attributes: [
+            "id",
+            "customMonthlyAmount",
+            "customPercentage",
+            "customNumberOfHours",
+            "customNumberOfDays",
+            "customNumberOfWeeks",
+            "customHourlyRate",
+            "customDailyRate",
+            "customWeeklyRate",
+            "calculatedAmount",
+            "effectiveDate",
+            "endDate",
+          ],
+          where: {
+            // Apply effectiveDate filter if provided, otherwise only status and endDate conditions
+            ...earningsDateFilter,
+            [Op.or]: [
+              { endDate: null },
+              { endDate: { [Op.gte]: new Date() } },
+            ],
+            status: "active",
+          },
+          required: false, // LEFT JOIN to include employees even if they have no earnings
+          include: [
+            {
+              model: Earnings,
+              as: 'earnings',
+              attributes: [
+                "id",
+                "earningsType",
+                "calculationMethod",
+                "isTaxable",
+                "status",
+                "mode",
+              ],
+              where: {
+                deletedAt: null,
+                companyId,
+                isTaxable: true,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    // If no employees are found, return an empty array with a message
+    if (!employees.length) {
+      return res.status(200).json({
+        message: startDate && endDate
+          ? "No employees found within the specified date range."
+          : "No employees found for the company.",
+        data: [],
+      });
+    }
+
+    return res.status(200).json({
+      message: "Employees with earnings fetched successfully.",
+      data: employees,
+    });
+  } catch (error) {
+    console.error("Error fetching employees with earnings:", error);
+    return res.status(500).json({
+      message: "Failed to fetch employees with earnings",
+      error: error.message,
+    });
+  }
 };
 
-// PERMANENTLY delete a company earnings record
 exports.permanentlyDeleteEarnings = async (req, res) => {
   const { id } = req.params;
 

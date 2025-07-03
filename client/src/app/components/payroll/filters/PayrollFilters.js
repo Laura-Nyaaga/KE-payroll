@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import axios from '../../utils/statutoryApi';
+import api, { BASE_URL } from '../../../config/api';
 import 'react-datepicker/dist/react-datepicker.css';
 import PayrollDateFilterModal from '../payrollDates/PayrollDateFilterModal';
 import { usePayrollContext } from "../context/PayrollContext";
@@ -61,7 +61,7 @@ export default function PayrollFilters() {
 
   const fetchOptions = async (key, url) => {
     try {
-      const response = await axios.get(url);
+      const response = await api.get(url);
       const data = response.data || [];
       setOptions(prev => ({ ...prev, [key]: data }));
     } catch (error) {

@@ -12,7 +12,7 @@ const Deduction = sequelize.define('Deduction', {
         type: DataTypes.INTEGER,
         allowNull: false,
         references: {
-            model: Company,
+            model: Company, 
             key: 'id',
         },
         validate: {
@@ -24,7 +24,6 @@ const Deduction = sequelize.define('Deduction', {
     deductionType: {
         type: DataTypes.STRING,
         allowNull: false,
-        unique: true,
         validate: {
             notEmpty: {
                 msg: 'Deduction type is required'
@@ -49,7 +48,7 @@ const Deduction = sequelize.define('Deduction', {
         type: DataTypes.ENUM('monthly', 'hourly', 'daily', 'weekly'),
         allowNull: false,
         defaultValue: 'monthly',
-          
+
     },
     status: {
         type: DataTypes.ENUM('active', 'inactive'),
@@ -69,8 +68,9 @@ const Deduction = sequelize.define('Deduction', {
         allowNull: true
     }
 }, {
-    paranoid: true,
+    paranoid: true, // Enables soft-deletes (adds deletedAt timestamp)
     validate: {
+        // Custom model-level validation
         modeMatchesCalculationMethod() {
           if (this.calculationMethod === 'percentage' && this.mode !== 'monthly') {
             throw new Error('Percentage-based deductions must have "monthly" mode.');
@@ -112,22 +112,17 @@ const EmployeeDeduction = sequelize.define('EmployeeDeduction', {
         type: DataTypes.DATEONLY,
         allowNull: false,
         defaultValue: DataTypes.NOW,
-        validate: {
-            isAfter: {
-                args: [new Date().toISOString().split('T')[0]],
-                msg: 'Effective date must be after the current date'
-            }
-        }
     },
     endDate: {
         type: DataTypes.DATEONLY,
         allowNull: true,
         validate: {
             isAfter: {
-                args: [new Date().toISOString().split('T')[0]],
-                msg: 'End date must be after the current date'
+                args: DataTypes.NOW,
+                msg: 'End date must be after the effective date'
             }
         }
+    
     },
     customPercentage: {
         type: DataTypes.DECIMAL(5, 2),
@@ -171,16 +166,6 @@ const EmployeeDeduction = sequelize.define('EmployeeDeduction', {
     }
 }, {
     timestamps: true,
-    // validate: {
-    //   async effectiveDateNotBeforeDeductionStart() {
-    //     if (this.effectiveDate && this.deductionId) {
-    //       const deduction = await Deduction.findByPk(this.deductionId);
-    //       if (deduction && new Date(this.effectiveDate) < new Date(deduction.startDate)) {
-    //         throw new Error('Effective date cannot be before the deduction start date.');
-    //       }
-    //     }
-    //   }
-    // },
     indexes: [
         {
             fields: ['employeeId', 'deductionId', 'effectiveDate'],

@@ -1,8 +1,8 @@
-'use client';
-import { useState, useEffect } from 'react';
-import AddEarningModal from './AddEarningModal';
-import EarningsTable from './EarningsTable';
-import api, { BASE_URL } from '../../../config/api';
+"use client";
+import { useState, useEffect, useCallback } from "react"; // Added useCallback
+import AddEarningModal from "./AddEarningModal";
+import EarningsTable from "./EarningsTable";
+import api, { BASE_URL } from "../../../config/api";
 
 export default function EarningsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
@@ -10,30 +10,43 @@ export default function EarningsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Fetch earnings from API
-  useEffect(() => {
-    const fetchEarnings = async () => {
-      setIsLoading(true);
-      try {
-        const response = await api.get(`${BASE_URL}/earnings/company/${localStorage.getItem('companyId')}`);
-        setEarnings(response.data);
-        setError(null);
-      } catch (err) {
-        console.error('Error fetching earnings:', err);
-        setError('Failed to load earnings. Please try again later.');
-      } finally {
-        setIsLoading(false);
+  // Fetch earnings from API - wrapped in useCallback
+  const fetchEarnings = useCallback(async () => {
+    setIsLoading(true);
+    setError(null); // Clear any previous errors
+    try {
+      const companyId = localStorage.getItem("companyId");
+      if (!companyId) {
+        throw new Error("Company ID not found. Please log in again.");
       }
-    };
+      const response = await api.get(
+        `${BASE_URL}/earnings/company/${companyId}`
+      );
+      setEarnings(response.data);
+    } catch (err) {
+      console.error("Error fetching earnings:", err);
+      setError("Failed to load earnings. Please try again later.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []); // Empty dependency array means this function is created once
 
+  // Fetch earnings on component mount
+  useEffect(() => {
     fetchEarnings();
-  }, []);
+  }, [fetchEarnings]); // Dependency array includes fetchEarnings
 
   // Handle adding a new earning
   const handleAddEarning = async (newEarning) => {
-    const companyId = localStorage.getItem('companyId');
-    
+    const companyId = localStorage.getItem("companyId");
+    if (!companyId) {
+      alert("Company ID not found. Cannot add earning.");
+      return;
+    }
+
     try {
+      setIsLoading(true); // Indicate loading for the add operation
+
       // Prepare request data using proper backend model structure
       const requestData = {
         companyId: companyId,
@@ -41,119 +54,77 @@ export default function EarningsPage() {
         calculationMethod: newEarning.calculationMethod,
         isTaxable: newEarning.isTaxable,
         mode: newEarning.mode,
-        status: 'active',
-        startDate: newEarning.startDate
+        status: "active", // Default to active for new earnings
+        startDate: newEarning.startDate,
+        fixedAmount: newEarning.fixedAmount || null, // Include fixedAmount if present
       };
-      
-      console.log("Sending earning to API:", requestData);
-     await api.post(`${BASE_URL}/earnings`, requestData);
-      const response = await api.get(`${BASE_URL}/earnings/company/${localStorage.getItem('companyId')}`);
 
-  
-      // Add new earning to state
-      setEarnings(prevEarnings => [...prevEarnings, response.data]);
+      console.log("Sending earning to API:", requestData);
+      await api.post(`${BASE_URL}/earnings`, requestData);
+
+      // After successful addition, re-fetch the entire list to ensure consistency
+      await fetchEarnings();
       setShowAddModal(false);
+      alert("Earning added successfully!");
     } catch (err) {
-      console.error('Error adding earning:', err);
-      // Extract error message from response if available
-      const errorMessage = err.response?.data?.message || 'Failed to add earning. Please try again.';
+      console.error("Error adding earning:", err);
+      const errorMessage =
+        err.response?.data?.message ||
+        "Failed to add earning. Please try again.";
       alert(errorMessage);
+    } finally {
+      setIsLoading(false); // End loading, whether successful or not
     }
   };
 
   // Handle updating an earning
-  const handleUpdateEarning = async (updatedEarning) => {
+  const handleUpdateEarning = async (updatedEarningData) => {
     try {
-      // Send update to API
-      await api.patch(`${BASE_URL}/earnings/${updatedEarning.id}`, updatedEarning);
-      
-      // Update local state
-      setEarnings(prevEarnings => 
-        prevEarnings.map(earning => 
-          earning.id === updatedEarning.id ? updatedEarning : earning
-        )
+      setIsLoading(true); // Indicate loading for the update operation
+      console.log("Updating earning:", updatedEarningData);
+      await api.patch(
+        `${BASE_URL}/earnings/${updatedEarningData.id}`,
+        updatedEarningData
       );
+
+      // After successful update, re-fetch the entire list to ensure consistency
+      await fetchEarnings();
+      alert("Earning updated successfully!");
     } catch (err) {
-      console.error('Error updating earning:', err);
-      const errorMessage = err.response?.data?.message || 'Failed to update earning. Please try again.';
+      console.error("Error updating earning:", err);
+      const errorMessage =
+        err.response?.data?.message ||
+        "Failed to update earning. Please try again.";
       alert(errorMessage);
-      
-      // Refresh earnings list to ensure UI is in sync with backend
-      const fetchEarnings = async () => {
-        try {
-          const response = await api.get(`${BASE_URL}/earnings/company/${localStorage.getItem('companyId')}`);
-          setEarnings(response.data);
-        } catch (fetchErr) {
-          console.error('Error refreshing earnings data:', fetchErr);
-        }
-      };
-      fetchEarnings();
-    }
-  };
-
-  // Handle exporting earnings data
-  const handleExportData = async () => {
-    try {
-      const response = await api.get('/payroll/earnings/export', {
-        responseType: 'blob'
-      });
-      
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'earnings_export.csv');
-      document.body.appendChild(link);
-      link.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(link);
-    } catch (err) {
-      console.error('Error exporting earnings:', err);
-      alert('Failed to export earnings. Please try again.');
-    }
-  };
-
-  // Handle earning changes
-  const handleEarningChange = (updatedEarnings) => {
-    // Find which earning was updated
-    const changedEarning = updatedEarnings.find((earning, index) => {
-      return JSON.stringify(earning) !== JSON.stringify(earnings[index]);
-    });
-    
-    if (changedEarning) {
-      handleUpdateEarning(changedEarning);
-    } else {
-      setEarnings(updatedEarnings);
+    } finally {
+      setIsLoading(false); // End loading
     }
   };
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <h1 className="text-3xl font-bold mb-8">Payroll Settings</h1>
-      
+
+      <div className="bg-blue-100 text-blue-800 p-3 rounded-md mb-2 ">
+        <p className="text-sm">
+          <span className="font-bold">NOTE: </span>Define any company allowances e.g
+          Transport Allowance other than Basic salary
+        </p>
+      </div>
+
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold">Earnings</h2>
+        <h2 className="text-xl font-semibold">Allowances</h2>
         <div className="flex items-center gap-4">
-          <button 
-            className="flex items-center text-pink-500 hover:text-pink-600 transition-colors"
-            onClick={handleExportData}
-            disabled={isLoading || earnings.length === 0}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-          </button>
-          <button 
-            className="bg-cyan-400 hover:bg-cyan-500 text-white px-6 py-2.5 rounded-md font-medium transition-colors"
+          <button
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-md font-medium transition-colors"
             onClick={() => setShowAddModal(true)}
             disabled={isLoading}
           >
-            Add Earning
+            Add Allowance
           </button>
         </div>
       </div>
-      
+
       {isLoading ? (
         <div className="flex justify-center items-center h-60">
           <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-cyan-500"></div>
@@ -163,14 +134,14 @@ export default function EarningsPage() {
           {error}
         </div>
       ) : (
-        <EarningsTable 
-          earnings={earnings} 
-          onEarningsChange={handleEarningChange} 
+        <EarningsTable
+          earnings={earnings}
+          onEarningsChange={handleUpdateEarning} // Pass the update handler directly
         />
       )}
 
       {showAddModal && (
-        <AddEarningModal 
+        <AddEarningModal
           onClose={() => setShowAddModal(false)}
           onAdd={handleAddEarning}
         />

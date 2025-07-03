@@ -37,7 +37,7 @@ export default function EditRegion({ region, onClose, onUpdate, onStatusChange }
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-lg shadow-lg w-full max-w-md">
         <div className="flex justify-between items-center p-4 border-b">
           <h2 className="text-lg font-semibold">Edit Region</h2>
@@ -57,12 +57,27 @@ export default function EditRegion({ region, onClose, onUpdate, onStatusChange }
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Region Name
             </label>
-            <input
+             <input
               type="text"
               name="name"
               value={formData.name}
-              onChange={handleChange}
-              className={`w-full p-2 border rounded-md ${errors.name ? 'border-red-500' : 'border-gray-300'}`}
+              onChange={(e) => {
+                const inputValue = e.target.value;
+                // Convert to title case: capitalize first letter of each word
+                const titleCaseValue = inputValue
+                  .toLowerCase()
+                  .replace(/(^|\s)\w/g, (letter) => letter.toUpperCase());
+                handleChange({
+                  target: { name: "name", value: titleCaseValue },
+                });
+              }}
+              className={`w-full p-2 border rounded-md ${
+                errors.name ? "border-red-500" : "border-gray-300"
+              }`}
+              aria-label="Region Name"
+              required
+              minLength={2}
+              maxLength={100}
             />
             {errors.name && (
               <p className="mt-1 text-xs text-red-500">{errors.name}</p>

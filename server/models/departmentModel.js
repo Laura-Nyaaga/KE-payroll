@@ -10,7 +10,6 @@ const Department = sequelize.define('Department', {
     title: {
         type: DataTypes.STRING,
         allowNull: false,
-        unique: true,
         validate: {
             len: {
                 args: [2, 100],
@@ -20,7 +19,6 @@ const Department = sequelize.define('Department', {
     },
     departmentCode: {
         type: DataTypes.STRING,
-        unique: true,
         allowNull: false,
         validate: {
             len: {
@@ -65,6 +63,20 @@ const Department = sequelize.define('Department', {
         allowNull: true,
         defaultValue: null,
     },
+}, {
+    indexes: [
+        {
+            unique: true,
+            fields: ['title', 'companyId'],
+            name: 'unique_department_title_per_company'
+        },
+        {
+            unique: true,
+            fields: ['departmentCode', 'companyId'],
+            name: 'unique_department_code_per_company'
+        }
+    ]
 });
+
 
 module.exports = Department;

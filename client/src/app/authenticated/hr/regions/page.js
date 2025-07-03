@@ -215,24 +215,7 @@ export default function RegionsPage() {
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-semibold text-gray-700">Regions Management</h2>
         <div className="flex items-center gap-4">
-          {/* Export Regions Button */}
-          <button
-            className="flex items-center text-blue-600 hover:text-blue-800 transition-colors duration-200 p-2 rounded-md hover:bg-blue-100"
-            onClick={() => {
-              // Implement bulk export functionality here
-              console.log('Export regions functionality to be implemented');
-              alert('Export functionality is not yet implemented.'); // Using alert for placeholder, replace with custom modal
-            }}
-            title="Export Regions"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            <span className="ml-2 font-medium">Export</span>
-          </button>
-
+        
           {/* Add Region Button */}
           <button
             className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2 rounded-md shadow-md transition-colors duration-200 flex items-center"
@@ -253,9 +236,6 @@ export default function RegionsPage() {
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-100">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                ID
-              </th>
               <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                 Region Name
               </th>
@@ -280,9 +260,6 @@ export default function RegionsPage() {
             ) : (
               regions.map((region) => (
                 <tr key={region.id} className="hover:bg-gray-50 transition-colors duration-150">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">
-                    {region.id}
-                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {region.name}
                   </td>

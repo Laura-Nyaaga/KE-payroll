@@ -1,6 +1,6 @@
 const { DataTypes, sequelize } = require('../config/db');
 const Company = require('./companyModel');
-const Employee = require('./employeesModel');
+// const Employee = require('./employeesModel');
 
 const Project = sequelize.define('Project', {
     id: {
@@ -11,7 +11,6 @@ const Project = sequelize.define('Project', {
     name: {
         type: DataTypes.STRING,
         allowNull: false,
-        unique: true,
         validate: {
             len: {
                 args: [2, 100],
@@ -21,13 +20,12 @@ const Project = sequelize.define('Project', {
     },
     projectCode: {
         type: DataTypes.STRING,
-        unique: true,
         allowNull: false,
         validate: {
             len: {
                 args: [2, 10],
                 msg: 'Project code must be between 2-10 characters'
-                },
+            },
             isAlphanumeric: {
                 msg: 'Project code must be alphanumeric'
             }
@@ -36,7 +34,6 @@ const Project = sequelize.define('Project', {
     description: {
         type: DataTypes.TEXT,
         allowNull: true,
-        unique: false,
         validate: {
             len: {
                 args: [0, 500],
@@ -60,14 +57,14 @@ const Project = sequelize.define('Project', {
             key: 'id',
         },
     },
-    inchargeId: {  
-        type: DataTypes.INTEGER,
-        allowNull: true,
-        references: {
-            model: 'Employee',
-            key: 'id',
-        },
-    },
+    // inchargeId: {  
+    //     type: DataTypes.INTEGER,
+    //     allowNull: true,
+    //     references: {
+    //         model: 'Employee',
+    //         key: 'id',
+    //     },
+    // },
     status: { 
         type: DataTypes.ENUM('active', 'inactive', 'completed', 'ongoing', 'cancelled', 'pending'),
         defaultValue: 'active',
@@ -83,10 +80,19 @@ const Project = sequelize.define('Project', {
         allowNull: true,
         defaultValue: null,
     },
-
+}, {
+    indexes: [
+        {
+            unique: true,
+            fields: ['name', 'companyId'],
+            name: 'unique_project_name_per_company'
+        },
+        {
+            unique: true,
+            fields: ['projectCode', 'companyId'],
+            name: 'unique_project_code_per_company'
+        }
+    ]
 });
-
-
-  
 
 module.exports = Project;

@@ -1,7 +1,11 @@
-import { useState, useEffect } from "react";
+// SalaryDetailsForm.jsx (your main component)
+'use client';
+import React, { useState, useEffect, useCallback } from "react";
 import { useFormContext } from "react-hook-form";
-import { BankDetailsModal, MobileMoneyDetailsModal } from "./paymentMethod";
-
+import { BankDetailsModal, MobileMoneyDetailsModal } from "./paymentMethod"; // Ensure this path is correct
+import { toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+import api, { BASE_URL } from '../../../config/api';
 
 const SalaryDetailsForm = () => {
   const {
@@ -13,564 +17,476 @@ const SalaryDetailsForm = () => {
     trigger,
     clearErrors,
     watch,
-    setError,
+    control,
   } = useFormContext();
 
-  const selectedPaymentMethod = watch("paymentMethod");
+  const selectedPaymentMethod = watch("paymentMethod") || "";
+  const modeOfPayment = watch("modeOfPayment") || "";
 
-  const [paymentMethodOptions, setPaymentMethodOptions] = useState([]);
-  const [currencyOptions, setCurrencyOptions] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Watch individual payment detail fields to determine their fill status
+  const bankName = watch("bankName");
+  const accountNumber = watch("accountNumber");
+  const mobileNumber = watch("mobileNumber");
 
+  const companyId = localStorage.getItem('companyId');
+
+  const [companyCurrency, setCompanyCurrency] = useState('KES');
   const [isBankModalOpen, setIsBankModalOpen] = useState(false);
   const [isMpesaModalOpen, setIsMpesaModalOpen] = useState(false);
 
-  const [paymentDetailsCompleted, setPaymentDetailsCompleted] = useState({
-    bank: false,
-    mobileMoney: false,
-  });
+  // Payment method options (static)
+  const paymentMethodOptions = [
+    { value: "bank", label: "Bank" },
+    { value: "cash", label: "Cash" },
+    { value: "cheque", label: "Cheque" },
+    { value: "mobileMoney", label: "Mobile Money" },
+  ];
 
-  const [prevPaymentMethod, setPrevPaymentMethod] = useState(null);
+  // Helper to determine if bank details are sufficiently filled
+  const areBankDetailsFilled = useCallback(() => {
+      const currentBankName = getValues("bankName");
+      const currentAccountNumber = getValues("accountNumber");
+      const currentAccountName = getValues("accountName");
+      return !!currentBankName && !!currentAccountNumber && !!currentAccountName;
+  }, [getValues]);
+
+  // Helper to determine if mobile money details are sufficiently filled
+  const areMobileMoneyDetailsFilled = useCallback(() => {
+      const currentMobileNumber = getValues("mobileNumber");
+      return !!currentMobileNumber;
+  }, [getValues]);
+
+  // Derive status message for UI
+  const paymentDetailsStatusMessage = useCallback(() => {
+    if (selectedPaymentMethod === "bank" || selectedPaymentMethod === "cheque") {
+      return areBankDetailsFilled()
+        ? `Bank details provided (${getValues("bankName")} - ${getValues("accountNumber")})`
+        : "Please provide bank account details";
+    } else if (selectedPaymentMethod === "mobileMoney") {
+      return areMobileMoneyDetailsFilled()
+        ? `Mobile Money details provided (${getValues("mobileNumber")})`
+        : "Please provide Mobile Money details";
+    }
+    return ""; // For cash or no selection
+  }, [selectedPaymentMethod, areBankDetailsFilled, areMobileMoneyDetailsFilled, getValues]);
 
 
-  const fallbackOptions = {
-    paymentMethods: [
-      { value: "bank", label: "Bank" },
-      { value: "cash", label: "Cash" },
-      { value: "cheque", label: "Cheque" },
-      { value: "mobileMoney", label: "Mobile Money" },
-    ],
-    currencies: [
-      { value: "KES", label: "KES" },
-      // { value: 'USD', label: 'USD' },
-      // { value: 'EUR', label: 'EUR' },
-      // { value: 'GBP', label: 'GBP' }
-    ],
-  };
-
+  // --- Initializing form values on first render (for select elements) ---
   useEffect(() => {
-    setPaymentMethodOptions(fallbackOptions.paymentMethods);
-    setCurrencyOptions(fallbackOptions.currencies);
-    setLoading(false);
-  }, []);
+    // This ensures selects bind correctly to "" if no default value is loaded from RHF
+    if (getValues("modeOfPayment") === undefined) {
+      setValue("modeOfPayment", "", { shouldValidate: false, shouldDirty: false });
+    }
+    if (getValues("paymentMethod") === undefined) {
+      setValue("paymentMethod", "", { shouldValidate: false, shouldDirty: false });
+    }
+    // These should not be set to empty string initially if they are expected to hold objects or null
+    // setValue("paymentMethodDetails", "", { shouldValidate: false, shouldDirty: false });
+  }, [setValue, getValues]);
 
+
+  // Fetch company currency
   useEffect(() => {
-    const mode = watch("modeOfPayment");
+    const fetchCompanyCurrency = async () => {
+      try {
+        const response = await api.get(`${BASE_URL}/companies/${companyId}`);
+        const currency = response.data.currency || 'KES';
+        setCompanyCurrency(currency);
+        setValue('currency', currency, { shouldValidate: true });
+      } catch (err) {
+        toast.error('Failed to fetch company currency');
+        console.error('Error fetching currency:', err);
+        setCompanyCurrency('KES');
+        setValue('currency', 'KES', { shouldValidate: true });
+      }
+    };
+
+    if (companyId) fetchCompanyCurrency();
+  }, [companyId, setValue]);
+
+  // Calculate basic salary
+  useEffect(() => {
     const amount = watch("amountPerRate");
     const units = watch("unitsWorked");
 
-    // More robust number handling
     const safeAmount = isNaN(Number(amount)) ? 0 : Number(amount);
     const safeUnits = isNaN(Number(units)) ? 0 : Number(units);
 
-    let calculatedSalary = 0;
-    if (mode === "monthly") {
-      calculatedSalary = Math.max(0, safeAmount);
-    } else {
-      calculatedSalary = Math.max(0, safeAmount * safeUnits);
-    }
+    let calculatedSalary = modeOfPayment === "monthly"
+      ? Math.max(0, safeAmount)
+      : Math.max(0, safeAmount * safeUnits);
 
     setValue("basicSalary", parseFloat(calculatedSalary.toFixed(2)), {
       shouldValidate: true,
-      shouldDirty: true,
-      shouldTouch: true,
     });
-  }, [
-    watch("modeOfPayment"),
-    watch("amountPerRate"),
-    watch("unitsWorked"),
-    setValue,
-  ]);
+  }, [modeOfPayment, watch("amountPerRate"), watch("unitsWorked"), setValue]);
 
+  // Handle conditional registration and validation based on payment method
   useEffect(() => {
-    // Always register mobileNumber field (but only require it conditionally)
-    register("mobileNumber");
+    const bankFields = ["bankName", "accountNumber", "bankCode", "branchName", "branchCode", "accountName", "accountName"];
+    const mobileMoneyField = "mobileNumber";
 
-    if (!selectedPaymentMethod) return; // Don't proceed if no payment method selected
+    // Unregister all potentially conflicting fields first
+    unregister([...bankFields, mobileMoneyField]);
+    clearErrors([...bankFields, mobileMoneyField]); // Clear errors associated with them
 
-
-    if (selectedPaymentMethod === "cash") {
-      unregister([
-        "bankName",
-        "accountNumber",
-        "bankCode",
-        "branchName",
-        "branchCode",
-        "accountName",
-        "paymentMethodDetails",
-      ],{keepValue: false});
-
-      clearErrors([
-        "bankName",
-        "accountNumber",
-        "bankCode",
-        "branchName",
-        "branchCode",
-        "accountName",
-        "mobileNumber",
-        "paymentMethodDetails",
-      ]);
-
-      setValue("mobileNumber", "");
-      clearErrors("mobileNumber");
-
-
-    } else if (
-      selectedPaymentMethod === "bank" ||
-      selectedPaymentMethod === "cheque"
-    ) {
-
-      // const isBankOrCheque = selectedPaymentMethod === "bank" || selectedPaymentMethod === "cheque";
-      const bankValidation = {
-        required: {
-          value: true,
-          message: `Field is required for ${selectedPaymentMethod} payments`
-        }};
-      
-        register("bankName", bankValidation);
-        register("accountNumber", bankValidation);
-        register("bankCode", bankValidation);
-        register("branchName", bankValidation);
-        register("branchCode", bankValidation);
-        register("accountName", bankValidation);
-
-    
-
-      // Clear mobile number validation
-      setValue("mobileNumber", "");
-      clearErrors("mobileNumber");
-
-
+    // Conditionally register and apply validation rules for the active method
+    if (selectedPaymentMethod === "bank" || selectedPaymentMethod === "cheque") {
+      register("bankName", { required: "Bank Name is required." });
+      register("accountNumber", { required: "Account Number is required." });
+      register("accountName", { required: "Account Name is required." });
+      register("bankCode");
+      register("branchName");
+      register("branchCode");
     } else if (selectedPaymentMethod === "mobileMoney") {
-      // Unregister bank fields
-      unregister([
-        "bankName",
-        "accountNumber",
-        "bankCode",
-        "branchName",
-        "branchCode",
-        "accountName",
-      ], {keepValue: false});
-
-    // Clear all bank-related errors
-      clearErrors([
-        "bankName",
-        "accountNumber",
-        "bankCode",
-        "branchName",
-        "branchCode",
-        "accountName",
-      ]);
-
-      // Set mobileNumber as required
-      setValue("mobileNumber", "", { shouldValidate: true });
+      register("mobileNumber", {
+        required: "Mobile Number is required.",
+        pattern: {
+            value: /^[0-9]{10,15}$/,
+            message: "Invalid mobile number format (10-15 digits)."
+        }
+      });
     }
-  }, [selectedPaymentMethod, register, unregister, clearErrors, setValue]);
+
+    // `paymentMethodDetails` field (hidden) should be used as a "status" or a marker.
+    // It is effectively required if selectedPaymentMethod is not "cash".
+    // We can directly set its value based on whether the specific details are filled.
+    if (selectedPaymentMethod === "cash") {
+        setValue("paymentMethodDetails", "N/A", { shouldValidate: true });
+    } else if (selectedPaymentMethod === "bank" || selectedPaymentMethod === "cheque") {
+        setValue("paymentMethodDetails", areBankDetailsFilled() ? "valid" : "", { shouldValidate: true });
+    } else if (selectedPaymentMethod === "mobileMoney") {
+        setValue("paymentMethodDetails", areMobileMoneyDetailsFilled() ? "valid" : "", { shouldValidate: true });
+    } else { // No method selected
+        setValue("paymentMethodDetails", "", { shouldValidate: true });
+    }
+
+    // Trigger validation for paymentMethodDetails and relevant individual fields
+    trigger("paymentMethodDetails");
+    if (selectedPaymentMethod === "bank" || selectedPaymentMethod === "cheque") {
+        trigger(bankFields);
+    } else if (selectedPaymentMethod === "mobileMoney") {
+        trigger(mobileMoneyField);
+    }
+
+  }, [selectedPaymentMethod, register, unregister, clearErrors, setValue, trigger, areBankDetailsFilled, areMobileMoneyDetailsFilled]);
+
 
   const handlePaymentMethodChange = (e) => {
     const method = e.target.value;
 
-      // Clear all payment-related values and errors
-      const paymentFields = [
-         "bankName",
-          "accountNumber",
-          "bankCode",
-          "branchName",
-          "branchCode",
-          "accountName",
-          "mobileNumber",
-          "paymentMethodDetails",
-        ];
+    // IMPORTANT: Clear all *relevant* payment detail values from RHF state
+    // when the payment method is changed. This prevents old data from lingering.
+    setValue("bankName", "", { shouldValidate: false });
+    setValue("accountNumber", "", { shouldValidate: false });
+    setValue("bankCode", "", { shouldValidate: false });
+    setValue("branchName", "", { shouldValidate: false });
+    setValue("branchCode", "", { shouldValidate: false });
+    setValue("accountName", "", { shouldValidate: false });
+    setValue("mobileNumber", "", { shouldValidate: false });
+    setValue("paymentMethodDetails", "", { shouldValidate: false }); // Reset this status field
 
-      paymentFields.forEach((field) => {
-      setValue(field, "");
-      });
-      clearErrors(paymentFields);
-    
-    setValue("paymentMethod", method, { shouldValidate: false });
+    clearErrors([
+      "bankName", "accountNumber", "bankCode", "branchName",
+      "branchCode", "accountName", "mobileNumber", "paymentMethodDetails",
+    ]);
 
-    // Reset payment details status
-    setPaymentDetailsCompleted({
-      bank: false,
-      mobileMoney: false,
-      });
+    setValue("paymentMethod", method, { shouldValidate: true });
 
-    // Close any open modals
-    // setIsBankModalOpen(false);
-    // setIsMpesaModalOpen(false);
-
-    
-
-    // Handle specific payment method logic
+    // Open appropriate modal if needed
     if (method === "bank" || method === "cheque") {
       setIsBankModalOpen(true);
+      setIsMpesaModalOpen(false);
     } else if (method === "mobileMoney") {
       setIsMpesaModalOpen(true);
-    }
-
-
-  // Manually trigger validation after a small delay
-  setTimeout(() => {
-    trigger();
-  }, 100);
-  };
-  
-
-  const handlePaymentDetailsComplete = (method) => {
-    if (method === "bank") {
       setIsBankModalOpen(false);
-      setPaymentDetailsCompleted((prev) => ({ ...prev, bank: true }));
-    } else if (method === "mobileMoney") {
+    } else { // For 'cash' or empty selection
+      setIsBankModalOpen(false);
       setIsMpesaModalOpen(false);
-      setPaymentDetailsCompleted((prev) => ({ ...prev, mobileMoney: true }));
     }
-
-    // Trigger form validation
-    setTimeout(() => {
-      trigger();
-    }, 200);
+    // After changing method, immediately re-trigger validation for paymentMethodDetails
+    // so the UI status updates.
+    trigger("paymentMethodDetails");
   };
 
-  const handleEditBankDetails = () => {
-    setIsBankModalOpen(true);
+  // NEW: Callback when bank details are saved from the modal
+  const handleSaveBankDetails = (details) => {
+    // Set all bank detail fields into RHF state
+    setValue("bankName", details.bankName, { shouldValidate: true });
+    setValue("accountNumber", details.accountNumber, { shouldValidate: true });
+    setValue("bankCode", details.bankCode, { shouldValidate: true });
+    setValue("branchName", details.branchName, { shouldValidate: true });
+    setValue("branchCode", details.branchCode, { shouldValidate: true });
+    setValue("accountName", details.accountName, { shouldValidate: true });
+
+    // Mark paymentMethodDetails as valid (or set a specific value)
+    setValue("paymentMethodDetails", "valid", { shouldValidate: true }); // A string "valid" or similar
+    
+    // Trigger validation for all newly set fields
+    trigger([
+      "bankName", "accountNumber", "bankCode", "branchName",
+      "branchCode", "accountName", "paymentMethodDetails"
+    ]);
+
+    setIsBankModalOpen(false); // Close the modal
+    toast.success("Bank details saved!");
   };
 
-  const handleEditMobileMoneyDetails = () => {
-    setIsMpesaModalOpen(true);
+  // NEW: Callback when mobile money details are saved from the modal
+  const handleSaveMobileMoneyDetails = (details) => {
+    // Set mobile number field into RHF state
+    setValue("mobileNumber", details.mobileNumber, { shouldValidate: true });
+
+    // Mark paymentMethodDetails as valid (or set a specific value)
+    setValue("paymentMethodDetails", "valid", { shouldValidate: true }); // A string "valid" or similar
+    
+    // Trigger validation for newly set fields
+    trigger(["mobileNumber", "paymentMethodDetails"]);
+
+    setIsMpesaModalOpen(false); // Close the modal
+    toast.success("Mobile Money details saved!");
   };
 
-  const inputClass =
-    "w-full border p-2 rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white text-black border-gray-200";
-  const selectClass =
-    "w-full border p-2 rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 appearance-none bg-white text-black border-gray-200";
-  const errorClass = "text-red-500 text-sm mt-1";
+  // Common field props (unchanged from HRDetailsForm, now with onChange for setValue)
+  const inputProps = (name, required = false, pattern = null) => ({
+    ...register(name, {
+      required: required && `${name.split(/(?=[A-Z])/).join(' ')} is required`,
+      pattern,
+      onBlur: () => trigger(name)
+    }),
+    className: "w-full border p-3 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500",
+    onChange: (e) => { // ADD THIS
+        setValue(name, e.target.value, { shouldValidate: true });
+        trigger(name);
+    }
+  });
+
+  const selectProps = (name, required = false) => ({
+    ...register(name, {
+      required: required && `${name.split(/(?=[A-Z])/).join(' ')} is required`,
+      onBlur: () => trigger(name)
+    }),
+    className: "w-full border p-3 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500",
+    onChange: (e) => { // ADD THIS
+        setValue(name, e.target.value, { shouldValidate: true });
+        trigger(name);
+    }
+  });
 
   return (
-    <>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-        <div className="md:col-span-2">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Currency Selection */}
-            <div className="relative">
-              <select
-                {...register("currency", { required: "Currency is required" })}
-                className={selectClass}
-                defaultValue="KES"
-              >
-                <option value="" disabled>
-                  Currency
-                </option>
-                {currencyOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-600">
-                <svg
-                  className="fill-current h-4 w-4"
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                >
-                  <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
-                </svg>
-              </div>
-              {errors?.currency && (
-                <p className={errorClass}>{errors.currency.message}</p>
-              )}
+    <div className="max-w-4xl mx-auto">
+      <div className="bg-white p-6 rounded-lg shadow-md grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Left Column */}
+        <div className="space-y-4">
+          {/* Currency (Display Only) */}
+          <div>
+            <label className="block text-sm font-semibold mb-2">Currency*</label>
+            <div className="w-full border p-3 rounded-lg shadow-sm bg-gray-100 flex items-center text-gray-600">
+              <span className="font-medium">{companyCurrency}</span>
             </div>
-
-            {/* Mode of Payment */}
-            <div className="relative">
-              <select
-                {...register("modeOfPayment", {
-                  required: "Mode of payment is required",
-                })}
-                className={selectClass}
-                defaultValue="monthly"
-              >
-                <option value="" disabled>
-                  Select Payment Mode
-                </option>
-                <option value="monthly">Monthly</option>
-                <option value="weekly">Weekly</option>
-                <option value="daily">Daily</option>
-                <option value="hourly">Hourly</option>
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-600">
-                <svg
-                  className="fill-current h-4 w-4"
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                >
-                  <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
-                </svg>
-              </div>
-              {errors?.modeOfPayment && (
-                <p className={errorClass}>{errors.modeOfPayment.message}</p>
-              )}
-            </div>
-
-            {/* Amount Per Rate */}
-            <div className="relative">
-              <input
-                type="number"
-                {...register("amountPerRate", {
-                  required: "Amount per rate is required",
-                  min: { value: 0, message: "Amount cannot be negative" },
-                  valueAsNumber: true,
-                })}
-                placeholder="Amount per rate"
-                className={inputClass}
-                step="0.01"
-              />
-              {errors?.amountPerRate && (
-                <p className={errorClass}>{errors.amountPerRate.message}</p>
-              )}
-            </div>
+            <input type="hidden" {...register("currency")} />
           </div>
-        </div>
 
-        {/* Units Worked (conditionally shown) */}
-        {watch("modeOfPayment") && watch("modeOfPayment") !== "monthly" && (
-          <div className="relative">
+          {/* Mode of Payment */}
+          <div>
+            <label className="block text-sm font-semibold mb-2">Mode of Payment*</label>
+            <select {...selectProps("modeOfPayment", true)}>
+              <option value="">Select Payment Mode</option>
+              <option value="monthly">Monthly</option>
+              <option value="weekly">Weekly</option>
+              <option value="daily">Daily</option>
+              <option value="hourly">Hourly</option>
+            </select>
+            {errors?.modeOfPayment && <p className="text-red-500 text-xs mt-1">{errors.modeOfPayment.message}</p>}
+          </div>
+
+          {/* Amount Per Rate */}
+          <div>
+            <label className="block text-sm font-semibold mb-2">Amount Per Rate*</label>
             <input
               type="number"
-              {...register("unitsWorked", {
-                required:
-                  watch("modeOfPayment") !== "monthly"
-                    ? "Units worked is required for non-monthly payments"
-                    : false,
-                min: { value: 0, message: "Units cannot be negative" },
-                valueAsNumber: true,
-                validate: (value) => {
-                  if (
-                    watch("modeOfPayment") !== "monthly" &&
-                    (value === null || value === undefined)
-                  ) {
-                    return "Units worked is required for this payment mode";
-                  }
-                  return true;
-                },
+              {...inputProps("amountPerRate", true, {
+                pattern: {
+                    value: /^(0|[1-9]\d*)(\.\d+)?$/,
+                    message: "Amount must be a positive number."
+                }
               })}
+              placeholder="e.g. 30000, 1500, 100"
+              step="0.01"
             />
-            {errors?.unitsWorked && (
-              <p className={errorClass}>{errors.unitsWorked.message}</p>
-            )}
+            {errors?.amountPerRate && <p className="text-red-500 text-xs mt-1">{errors.amountPerRate.message}</p>}
           </div>
-        )}
 
-        {/* Hidden basic salary field */}
-        <input type="hidden" {...register("basicSalary")} />
-
-        {/* Calculated Basic Salary (Display Only) */}
-        <div
-          className={`relative ${
-            watch("modeOfPayment") !== "monthly" ? "" : "md:col-span-2"
-          }`}
-        >
-          <div
-            className={`${inputClass} bg-gray-100 flex items-center text-gray-600`}
-          >
-            <span className="mr-1">Calculated Basic Salary:</span>
-            <span className="font-medium ml-1">
-              {watch("basicSalary")?.toLocaleString() || "0"}{" "}
-              {watch("currency")}
-            </span>
-          </div>
-          {errors?.basicSalary && (
-            <p className={errorClass}>{errors.basicSalary.message}</p>
+          {/* Units Worked */}
+          {modeOfPayment !== "monthly" && (
+            <div>
+              <label className="block text-sm font-semibold mb-2">Units Worked*</label>
+              <input
+                type="number"
+                {...inputProps("unitsWorked", true, {
+                  pattern: {
+                    value: /^(0|[1-9]\d*)(\.\d+)?$/,
+                    message: "Units must be a positive number."
+                  }
+                })}
+                placeholder="e.g. 1, 20, 100"
+                step="0.01"
+              />
+              {errors?.unitsWorked && <p className="text-red-500 text-xs mt-1">{errors.unitsWorked.message}</p>}
+            </div>
           )}
         </div>
 
-        {/* Method of Payment */}
-        <div className="relative">
-          <select
-            {...register("paymentMethod", {
-              required: "Method of Payment is required",
-            })}
-            className={selectClass}
-            onChange={handlePaymentMethodChange}
-          >
-            <option value="" disabled>
-              Select Method of Payment
-            </option>
-            {paymentMethodOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-600">
-            <svg
-              className="fill-current h-4 w-4"
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
+        {/* Right Column */}
+        <div className="space-y-4">
+          {/* Payment Method */}
+          <div>
+            <label className="block text-sm font-semibold mb-2">Method of Payment*</label>
+            <select
+              {...selectProps("paymentMethod", true)}
+              onChange={handlePaymentMethodChange}
             >
-              <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
-            </svg>
+              <option value="">Select Method</option>
+              {paymentMethodOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {errors?.paymentMethod && <p className="text-red-500 text-xs mt-1">{errors.paymentMethod.message}</p>}
           </div>
-          {errors?.paymentMethod && (
-            <p className={errorClass}>{errors.paymentMethod.message}</p>
-          )}
+
+          {/* Leave Days */}
+          <div>
+            <label className="block text-sm font-semibold mb-2">Accumulated Leave Days</label>
+            <input
+              type="number"
+              {...inputProps("accumulatedLeaveDays", false, {
+                min: { value: 0, message: "Days cannot be negative" }
+              })}
+              placeholder="Accumulated Leave Days"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-2">Utilized Leave Days</label>
+            <input
+              type="number"
+              {...inputProps("utilizedLeaveDays", false, {
+                min: { value: 0, message: "Days cannot be negative" }
+              })}
+              placeholder="Utilized Leave Days"
+            />
+          </div>
+
+          {/* Basic Salary Display */}
+          <div>
+            <label className="block text-sm font-semibold mb-2">Calculated Basic Salary</label>
+            <div className="w-full border p-3 rounded-lg shadow-sm bg-gray-100 flex items-center text-gray-600">
+              <span className="mr-1">Salary:</span>
+              <span className="font-medium ml-1">
+                {watch("basicSalary")?.toLocaleString() || "0"} {companyCurrency}
+              </span>
+            </div>
+          </div>
         </div>
 
-        {/* Accumulated Leave Days */}
-        <div className="relative">
-          <input
-            type="number"
-            {...register("accumulatedLeaveDays", {
-              required: "Accumulated Leave Days are required",
-              min: { value: 0, message: "Days cannot be negative" },
-              valueAsNumber: true,
-            })}
-            placeholder="Accumulated Leave Days"
-            className={inputClass}
-          />
-          {errors?.accumulatedLeaveDays && (
-            <p className={errorClass}>{errors.accumulatedLeaveDays.message}</p>
-          )}
-        </div>
-
-        {/* Utilized Leave Days */}
-        <div className="relative">
-          <input
-            type="number"
-            {...register("utilizedLeaveDays", {
-              required: "Utilized Leave Days are required",
-              min: { value: 0, message: "Days cannot be negative" },
-              valueAsNumber: true,
-            })}
-            placeholder="Utilized Leave Days"
-            className={inputClass}
-          />
-          {errors?.utilizedLeaveDays && (
-            <p className={errorClass}>{errors.utilizedLeaveDays.message}</p>
-          )}
-        </div>
-
-        {/* Payment method details status - now full width */}
-        {(selectedPaymentMethod === "bank" ||
-          selectedPaymentMethod === "cheque") && (
+        {/* Payment Method Details Status/Button */}
+        {(selectedPaymentMethod === "bank" || selectedPaymentMethod === "cheque") && (
           <div className="md:col-span-2">
-            <div
-              className={`p-2 rounded ${
-                paymentDetailsCompleted.bank
-                  ? "bg-green-100 text-green-800"
-                  : "bg-yellow-100 text-yellow-800"
-              } flex items-center`}
-            >
-              <svg
-                className={`w-4 h-4 mr-2 ${
-                  paymentDetailsCompleted.bank
-                    ? "text-green-500"
-                    : "text-yellow-500"
-                }`}
-                fill="currentColor"
-                viewBox="0 0 20 20"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                {paymentDetailsCompleted.bank ? (
-                  <path
-                    fillRule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                    clipRule="evenodd"
-                  />
-                ) : (
-                  <path
-                    fillRule="evenodd"
-                    d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                    clipRule="evenodd"
-                  />
-                )}
-              </svg>
+            <div className={`p-3 rounded flex items-center ${
+              areBankDetailsFilled() // Use the new helper function
+                ? "bg-green-100 text-green-800"
+                : "bg-yellow-100 text-yellow-800"
+            }`}>
               <div className="flex-grow">
-                {paymentDetailsCompleted.bank
-                  ? `Bank details have been provided (${getValues(
-                      "bankName"
-                    )} - ${getValues("accountNumber")})`
-                  : "Please provide bank account details"}
+                {paymentDetailsStatusMessage()} {/* Use the new message function */}
               </div>
               <button
                 type="button"
-                onClick={handleEditBankDetails}
-                className="ml-auto text-xs underline"
+                onClick={() => setIsBankModalOpen(true)}
+                className="ml-auto text-sm underline hover:text-green-600"
               >
-                {paymentDetailsCompleted.bank ? "Edit Details" : "Add Details"}
+                {areBankDetailsFilled() ? "Edit Details" : "Add Details"}
               </button>
             </div>
+            {errors.paymentMethodDetails && <p className="text-red-500 text-xs mt-1">{errors.paymentMethodDetails.message}</p>}
           </div>
         )}
 
         {selectedPaymentMethod === "mobileMoney" && (
           <div className="md:col-span-2">
-            <div
-              className={`p-2 rounded ${
-                paymentDetailsCompleted.mobileMoney
-                  ? "bg-green-100 text-green-800"
-                  : "bg-yellow-100 text-yellow-800"
-              } flex items-center`}
-            >
-              <svg
-                className={`w-4 h-4 mr-2 ${
-                  paymentDetailsCompleted.mobileMoney
-                    ? "text-green-500"
-                    : "text-yellow-500"
-                }`}
-                fill="currentColor"
-                viewBox="0 0 20 20"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                {paymentDetailsCompleted.mobileMoney ? (
-                  <path
-                    fillRule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                    clipRule="evenodd"
-                  />
-                ) : (
-                  <path
-                    fillRule="evenodd"
-                    d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                    clipRule="evenodd"
-                  />
-                )}
-              </svg>
+            <div className={`p-3 rounded flex items-center ${
+              areMobileMoneyDetailsFilled() // Use the new helper function
+                ? "bg-green-100 text-green-800"
+                : "bg-yellow-100 text-yellow-800"
+            }`}>
               <div className="flex-grow">
-                {paymentDetailsCompleted.mobileMoney
-                  ? `Mobile Money details have been provided (${getValues(
-                      "mobileNumber"
-                    )})`
-                  : "Please provide Mobile Money details"}
+                {paymentDetailsStatusMessage()} {/* Use the new message function */}
               </div>
               <button
                 type="button"
-                onClick={handleEditMobileMoneyDetails}
-                className="ml-auto text-xs underline"
+                onClick={() => setIsMpesaModalOpen(true)}
+                className="ml-auto text-sm underline hover:text-green-600"
               >
-                {paymentDetailsCompleted.mobileMoney
-                  ? "Edit Details"
-                  : "Add Details"}
+                {areMobileMoneyDetailsFilled() ? "Edit Details" : "Add Details"}
               </button>
             </div>
+             {errors.paymentMethodDetails && <p className="text-red-500 text-xs mt-1">{errors.paymentMethodDetails.message}</p>}
           </div>
         )}
       </div>
 
-      {/* Payment Method Modals */}
+      {/* Keep these hidden inputs registered, as their values are managed via setValue */}
+      <input type="hidden" {...register("basicSalary")} />
+      <input type="hidden" {...register("paymentMethodDetails")} />
+      
+      {/* Individual fields that the modal will fill. Register them here so they are part of the form state. */}
+      {/* This is important for the `getValues` in `areBankDetailsFilled` and `areMobileMoneyDetailsFilled` to work */}
+      <input type="hidden" {...register("bankName")} />
+      <input type="hidden" {...register("accountNumber")} />
+      <input type="hidden" {...register("bankCode")} />
+      <input type="hidden" {...register("branchName")} />
+      <input type="hidden" {...register("branchCode")} />
+      <input type="hidden" {...register("accountName")} />
+      <input type="hidden" {...register("mobileNumber")} />
+
+
       <BankDetailsModal
         isOpen={isBankModalOpen}
-        onClose={() => setIsBankModalOpen(false)}
-        onSave={() => handlePaymentDetailsComplete("bank")}
-        errors={errors}
+        onClose={() => {
+            setIsBankModalOpen(false);
+            // Re-trigger validation for paymentMethodDetails if modal is closed without saving
+            // This ensures the required status updates correctly if user cancels without filling
+            trigger("paymentMethodDetails");
+        }}
+        // Pass the new save handler that receives data
+        onSave={handleSaveBankDetails}
+        // Pass current RHF values to pre-fill the modal
+        initialData={{
+          bankName: getValues("bankName"),
+          accountNumber: getValues("accountNumber"),
+          bankCode: getValues("bankCode"),
+          branchName: getValues("branchName"),
+          branchCode: getValues("branchCode"),
+          accountName: getValues("accountName"),
+        }}
       />
 
       <MobileMoneyDetailsModal
         isOpen={isMpesaModalOpen}
-        onClose={() => setIsMpesaModalOpen(false)}
-        onSave={() => handlePaymentDetailsComplete("mobileMoney")}
-        errors={errors}
+        onClose={() => {
+            setIsMpesaModalOpen(false);
+            trigger("paymentMethodDetails");
+        }}
+        // Pass the new save handler that receives data
+        onSave={handleSaveMobileMoneyDetails}
+        // Pass current RHF values to pre-fill the modal
+        initialData={{
+          mobileNumber: getValues("mobileNumber"),
+        }}
       />
-    </>
+    </div>
   );
 };
 

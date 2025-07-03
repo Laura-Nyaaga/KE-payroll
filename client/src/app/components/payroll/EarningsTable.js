@@ -57,9 +57,9 @@ export default function EarningsTable({
               </th>
             ))}
 
-            {visibleColumns?.total && (
+            {visibleColumns?.grossPay && (
               <th className="border px-6 py-3 text-left text-xs font-bold titlecase tracking-wider">
-                Total
+                Gross Pay
               </th>
             )}
           </tr>
@@ -74,6 +74,8 @@ export default function EarningsTable({
               },
               0
             );
+
+            const grossPay = (parseFloat(employee.basicSalary)) + totalEarnings;
 
             return (
               <tr
@@ -91,7 +93,7 @@ export default function EarningsTable({
                   </td>
                 )}
                 {visibleColumns?.basicSalary && (
-                  <td className="border px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <td className="border ptotalx-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {formatCurrency(employee.basicSalary)}
                   </td>
                 )}
@@ -116,9 +118,9 @@ export default function EarningsTable({
                     </td>
                   );
                 })}
-                {visibleColumns?.total && (
+                {visibleColumns?.grossPay && (
                   <td className="border px-6 py-4 whitespace-nowrap text-sm font-bold">
-                    {formatCurrency(totalEarnings)}
+                    {formatCurrency(grossPay)}
                   </td>
                 )}
               </tr>

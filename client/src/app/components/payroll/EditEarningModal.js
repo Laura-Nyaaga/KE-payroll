@@ -255,14 +255,14 @@ export default function EditEarningModal({ earning, onClose, onSave }) {
   if (!earning) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-        <h3 className="text-lg font-medium mb-4">Edit Earnings</h3>
+        <h3 className="text-lg font-medium mb-4">Edit Allowance</h3>
         
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Earning Type
+              Allowance
             </label>
             <input
               type="text"
@@ -291,25 +291,6 @@ export default function EditEarningModal({ earning, onClose, onSave }) {
           </div>
 
           {renderCalculationFields()}
-
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Current Amount
-            </label>
-            <input
-              type="text"
-              className="w-full px-3 py-2 border rounded-md bg-gray-100"
-              value={
-                earning.calculatedAmount?.toLocaleString("en-US", {
-                  style: "decimal",
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }) || "0.00"
-              }
-              readOnly
-            />
-          </div>
-
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Status

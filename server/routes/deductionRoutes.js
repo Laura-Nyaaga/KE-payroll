@@ -28,7 +28,7 @@ router.patch('/employee-deductions/:id', authMiddleware, rbacMiddleware(['Admin'
 router.delete('/employee-deductions/:id', authMiddleware, rbacMiddleware(['Admin', 'Hr', 'Accountant', 'SuperAdmin']), deductionController.deleteEmployeeSpecificDeduction);
 // Get All Employees with Deductions for a Specific Company
 router.get(
-    '/companies/:companyId/employees-with-deductions', authMiddleware,
+    '/companies/:companyId/employees-with-deductions', authMiddleware, rbacMiddleware(['Admin', 'Hr', 'Accountant', 'SuperAdmin']),
     deductionController.getAllEmployeesWithDeductionsByCompany
 );
 

@@ -10,7 +10,6 @@ const Region = sequelize.define('Region', {
     name: {
         type: DataTypes.STRING,
         allowNull: false,
-        unique: true,
         validate: {
             len: {
                 args: [2, 100],
@@ -51,6 +50,15 @@ const Region = sequelize.define('Region', {
         allowNull: true,
         defaultValue: null,
     },
+}, {
+    indexes: [
+        {
+            unique: true,
+            fields: ['name', 'companyId'],
+            name: 'unique_region_name_per_company'
+        }
+    ]
 });
+
 
 module.exports = Region;

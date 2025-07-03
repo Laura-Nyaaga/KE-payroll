@@ -60,7 +60,7 @@ exports.getAllCompanyDeductions = async (req, res) => {
             },
             attributes: [
                 'id', 'deductionType', 
-                'calculationMethod', 'status', 
+                'calculationMethod','mode','status', 
                 'isTaxable', 'createdAt', 'updatedAt'
             ]
         });
@@ -149,7 +149,7 @@ exports.updateDeduction = async (req, res) => {
     try {
         const { id } = req.params;
         const { 
-            // calculationMethod,
+            calculationMethod,
             mode,
             isTaxable,
             status,} = req.body;
@@ -158,11 +158,6 @@ exports.updateDeduction = async (req, res) => {
             await transaction.rollback();
             return res.status(400).json({ message: 'Invalid calculation method' });
         } 
-        
-        if ('calculationMethod' in req.body || 'deductionType' in req.body || 'mode' in req.body) {
-            await transaction.rollback();
-            return res.status(400).json({ message: 'Cannot update deductionType, calculationMethod, or mode once set.' });
-        }
 
         const deduction = await Deduction.findByPk(id, { transaction });
 
@@ -191,7 +186,6 @@ exports.updateDeduction = async (req, res) => {
         });
     }
 };
-
 
 // Soft Delete Deductions Associated to the Company
 exports.softDeleteDeduction = async (req, res) => {
@@ -260,7 +254,7 @@ exports.assignToEmployee = async (req, res) => {
     //   const employee = await getValidEmployee(employeeId, transaction);
     const data = {
         employeeId,
-        earningsId,
+        deductionId,
         effectiveDate: effectiveDate || new Date(),
         endDate,
         status: 'active',
@@ -315,7 +309,6 @@ exports.assignToEmployee = async (req, res) => {
       });
     }
   };
-
 // Update Employee Deduction
 exports.updateEmployeeDeduction = async (req, res) => {
     const transaction = await sequelize.transaction();
@@ -614,68 +607,204 @@ exports.getAllSystemDeductions = async (req, res) => {
 };
 
 // Get All Employees with Deductions for a Specific Company
+// exports.getAllEmployeesWithDeductionsByCompany = async (req, res) => {
+//     try {
+//         const { companyId } = req.params;
+
+//         if (!companyId) {
+//             return res.status(400).json({ message: 'companyId path parameter is required' });
+//         }
+
+//         const employees = await Employee.findAll({
+//             where: {
+//                 companyId,
+//                 deletedAt: null
+//             },
+//             include: [{
+//                 model: EmployeeDeduction,
+//                 as: 'employeeDeductions',
+//                 where: {
+//                     status: 'active',
+//                     [Op.or]: [
+//                         { endDate: null },
+//                         { endDate: { [Op.gte]: new Date() }}
+//                     ]
+//                 },
+//                 required: true, // Include employees even if they have no deductions
+//                 include: [{
+//                     model: Deduction,
+//                     as: 'deduction',
+//                     where: {
+//                         companyId,
+//                         deletedAt: null
+//                     },
+//                     attributes: ['id', 'deductionType', 
+//                         'calculationMethod', 'status',
+//                         'isTaxable', 'mode'
+//                     ]
+//                 }],
+//                 attributes: ['id', 'customMonthlyAmount', 'customPercentage', 
+//                     'effectiveDate', 'endDate', 'calculatedAmount',
+//                     'customNumberOfHours', 'customNumberOfDays', 
+//                   'customNumberOfWeeks', 'customHourlyRate', 'customDailyRate', 
+//                   'customWeeklyRate'
+//                 ]
+//             }],
+//             attributes: ['id', 'firstName', 'lastName', 'staffNo', 'basicSalary']
+//         });
+//         // Filter out deductions that might be null if required=false was used
+//         const result = employees.map(employee => {
+//             const employeeData = employee.get({ plain: true });
+//             employeeData.employeeDeductions = employeeData.employeeDeductions.filter(
+//                 ed => ed.deduction !== null
+//             );
+//             return employeeData;
+//         });
+
+//         res.status(200).json(result);
+//     } catch (error) {
+//         console.error('Error fetching employees with deductions by company:', error);
+//         res.status(500).json({ 
+//             message: 'Failed to fetch employees with deductions by company', 
+//             error: error.message 
+//         });
+//     }
+// };
+
 exports.getAllEmployeesWithDeductionsByCompany = async (req, res) => {
-    try {
-        const { companyId } = req.params;
+  try {
+    const { companyId } = req.params;
+    const { startDate, endDate } = req.query;
 
-        if (!companyId) {
-            return res.status(400).json({ message: 'companyId path parameter is required' });
-        }
-
-        const employees = await Employee.findAll({
-            where: {
-                companyId,
-                deletedAt: null
-            },
-            include: [{
-                model: EmployeeDeduction,
-                as: 'employeeDeductions',
-                where: {
-                    status: 'active',
-                    [Op.or]: [
-                        { endDate: null },
-                        { endDate: { [Op.gte]: new Date() }}
-                    ]
-                },
-                required: false, // Include employees even if they have no deductions
-                include: [{
-                    model: Deduction,
-                    as: 'deduction',
-                    where: {
-                        companyId,
-                        deletedAt: null
-                    },
-                    attributes: ['id', 'deductionType', 
-                        'calculationMethod', 'status',
-                        'isTaxable', 'mode'
-                    ]
-                }],
-                attributes: ['id', 'customMonthlyAmount', 'customPercentage', 
-                    'effectiveDate', 'endDate', 'calculatedAmount',
-                    'customNumberOfHours', 'customNumberOfDays', 
-                  'customNumberOfWeeks', 'customHourlyRate', 'customDailyRate', 
-                  'customWeeklyRate'
-                ]
-            }],
-            attributes: ['id', 'firstName', 'lastName', 'staffNo', 'basicSalary']
-        });
-        // Filter out deductions that might be null if required=false was used
-        const result = employees.map(employee => {
-            const employeeData = employee.get({ plain: true });
-            employeeData.employeeDeductions = employeeData.employeeDeductions.filter(
-                ed => ed.deduction !== null
-            );
-            return employeeData;
-        });
-
-        res.status(200).json(result);
-    } catch (error) {
-        console.error('Error fetching employees with deductions by company:', error);
-        res.status(500).json({ 
-            message: 'Failed to fetch employees with deductions by company', 
-            error: error.message 
-        });
+    // Validate companyId
+    if (!companyId) {
+      return res.status(400).json({ message: 'companyId path parameter is required' });
     }
+
+    // Validate and parse date inputs if provided
+    const isValidDate = (date) => date instanceof Date && !isNaN(date);
+    let employmentDateFilter = {};
+    let deductionDateFilter = {};
+
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+
+      if (!isValidDate(start) || !isValidDate(end)) {
+        return res.status(400).json({ message: "Invalid date format. Use YYYY-MM-DD." });
+      }
+
+      if (start > end) {
+        return res.status(400).json({ message: "startDate cannot be after endDate." });
+      }
+
+      // Apply date filters for employmentDate and effectiveDate
+      employmentDateFilter = {
+        [Op.gte]: start,
+        [Op.lte]: end,
+      };
+      deductionDateFilter = {
+        effectiveDate: {
+          [Op.gte]: start,
+          [Op.lte]: end,
+        },
+      };
+    }
+
+    // Build the query with aliases
+    const employees = await Employee.findAll({
+      where: {
+        deletedAt: null,
+        companyId,
+        // Apply employmentDate filter only if dates are provided
+        ...(Object.keys(employmentDateFilter).length > 0 && { employmentDate: employmentDateFilter }),
+      },
+      attributes: [
+        'id',
+        'firstName',
+        'lastName',
+        'staffNo',
+        'basicSalary',
+      ],
+      include: [
+        {
+          model: EmployeeDeduction,
+          as: 'employeeDeductions', 
+          attributes: [
+            'id',
+            'customMonthlyAmount',
+            'customPercentage',
+            'customNumberOfHours',
+            'customNumberOfDays',
+            'customNumberOfWeeks',
+            'customHourlyRate',
+            'customDailyRate',
+            'customWeeklyRate',
+            'calculatedAmount',
+            'effectiveDate',
+            'endDate',
+          ],
+          where: {
+            ...deductionDateFilter,
+            [Op.or]: [
+              { endDate: null },
+              { endDate: { [Op.gte]: new Date() } },
+            ],
+            status: 'active',
+          },
+          required: true, 
+          include: [
+            {
+              model: Deduction,
+              as: 'deduction', 
+              attributes: [
+                'id',
+                'deductionType',
+                'calculationMethod',
+                'isTaxable',
+                'status',
+                'mode',
+              ],
+              where: {
+                deletedAt: null,
+                companyId,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    // If no employees are found, return an empty array with a message
+    if (!employees.length) {
+      return res.status(200).json({
+        message: startDate && endDate
+          ? 'No employees found within the specified date range.'
+          : 'No employees found for the company.',
+        data: [],
+      });
+    }
+
+    // Map the result to ensure plain objects and filter out null deductions
+    const result = employees.map(employee => {
+      const employeeData = employee.get({ plain: true });
+      employeeData.employeeDeductions = employeeData.employeeDeductions.filter(
+        ed => ed.deduction !== null
+      );
+      return employeeData;
+    });
+
+    return res.status(200).json({
+      message: 'Employees with deductions fetched successfully.',
+      data: result,
+    });
+  } catch (error) {
+    console.error('Error fetching employees with deductions by company:', error);
+    return res.status(500).json({
+      message: 'Failed to fetch employees with deductions by company',
+      error: error.message,
+    });
+  }
 };
 
 

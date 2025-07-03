@@ -5,9 +5,10 @@ const Employee = require("./employeesModel");
 const Earnings = sequelize.define(
   "Earnings",
   {
-    id: { type: DataTypes.INTEGER, 
-      primaryKey: true, 
-      autoIncrement: true 
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
     },
     companyId: {
       type: DataTypes.INTEGER,
@@ -20,7 +21,6 @@ const Earnings = sequelize.define(
     earningsType: {
       type: DataTypes.STRING,
       allowNull: false,
-      unique: true,
       validate: {
         notEmpty: { msg: "Earnings type is required" },
         len: {
@@ -49,19 +49,17 @@ const Earnings = sequelize.define(
       allowNull: false,
       defaultValue: "active",
     },
-    createdAt: { 
-      type: DataTypes.DATE, 
-      defaultValue: 
-      DataTypes.NOW 
+    createdAt: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW
     },
-    updatedAt: { 
-      type: DataTypes.DATE, 
-      defaultValue: 
-      DataTypes.NOW 
+    updatedAt: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW
     },
-    deletedAt: { 
-      type: DataTypes.DATE, 
-      allowNull: true 
+    deletedAt: {
+      type: DataTypes.DATE,
+      allowNull: true
     },
   },
   {
@@ -116,20 +114,14 @@ const EmployeeEarnings = sequelize.define(
       type: DataTypes.DATEONLY,
       allowNull: false,
       defaultValue: DataTypes.NOW,
-      validate: {
-        isAfter: {
-          args: [new Date().toISOString().split("T")[0]],
-          msg: "Effective date must be after the current date.",
-          },
-    },
     },
     endDate: { 
       type: DataTypes.DATEONLY, 
       allowNull: true,
       validate: {
         isAfter: {
-          args: [new Date().toISOString().split("T")[0]],
-          msg: "End date must be after the current date.",
+          args: new Date().toISOString().split("T")[0],
+          msg: "End date must be after the effective date",
         },
       },
   },

@@ -4,7 +4,7 @@ const softDelete = require("../utils/softDelete");
 // CREATE PROJECT for a specific company
 exports.createProject = async (req, res) => {
   try {
-    const { companyId, ...projectData } = req.body;
+    const { companyId,name, projectCode, ...projectData } = req.body;
 
     // Check if the company exists
     const company = await Company.findByPk(companyId);
@@ -12,6 +12,22 @@ exports.createProject = async (req, res) => {
       return res.status(400).json({ message: "Company not found" });
     }
 
+    const existingProject = await Project.findOne({
+      where: {
+        companyId,
+        [Op.or]: [
+          { name },
+          { projectCode }
+        ],
+        deletedAt: null
+      }
+    });
+
+    if (existingProject) {
+      return res.status(409).json({
+        message: "A project with the same name or project code already exists in this company."
+      });
+    }
     const newProject = await Project.create({ ...projectData, companyId });
     res.status(201).json(newProject);
   } catch (error) {
@@ -60,39 +76,47 @@ exports.getProjectById = async (req, res) => {
 // UPDATE PROJECT BY ID
 exports.updateProject = async (req, res) => {
   try {
-    const { companyId, ...projectData } = req.body;
+    const { companyId, name, projectCode, ...rest } = req.body;
     const projectId = req.params.id;
 
-    // Check if the project exists and is not deleted
-    const existingProject = await Project.findByPk(projectId, { where: { deletedAt: null } });
-    if (!existingProject) {
+    const existingProject = await Project.findByPk(projectId);
+    if (!existingProject || existingProject.deletedAt) {
       return res.status(404).json({ message: "Project not found" });
     }
 
-    // If companyId is provided, check if the company exists
-    if (companyId) {
-      const company = await Company.findByPk(companyId);
-      if (!company) {
-        return res.status(400).json({ message: "Company not found" });
+    const effectiveCompanyId = companyId || existingProject.companyId;
+
+    const conflict = await Project.findOne({
+      where: {
+        companyId: effectiveCompanyId,
+        id: { [Op.ne]: projectId },
+        deletedAt: null,
+        [Op.or]: [
+          name ? { name } : null,
+          projectCode ? { projectCode } : null
+        ].filter(Boolean) 
       }
-      await Project.update({ ...projectData, companyId }, {
-        where: { id: projectId, deletedAt: null },
-      });
-    } else {
-      await Project.update(projectData, {
-        where: { id: projectId, deletedAt: null },
+    });
+
+    if (conflict) {
+      return res.status(409).json({
+        message: "Another project with the same name or project code exists in this company."
       });
     }
+
+    await Project.update(
+      { ...rest, name, projectCode, companyId: effectiveCompanyId },
+      { where: { id: projectId } }
+    );
 
     const updatedProject = await Project.findByPk(projectId, { include: [{ model: Company, as: "company" }] });
     res.status(200).json(updatedProject);
   } catch (error) {
     console.error("Error updating project:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to update project", error: error.errors });
+    res.status(500).json({ message: "Failed to update project", error: error?.errors || error.message });
   }
 };
+
 
 // SOFT DELETING
 exports.softDeleteProject = async (req, res) => {
