@@ -30,6 +30,14 @@ Developed using **Next.js, React, Tailwind CSS, Node.js, Express, and MySQL**.
 - MySQL (local or hosted instance)
 - Git
 
+
+<img width="1833" height="922" alt="image" src="https://github.com/user-attachments/assets/6acce088-75b1-4dab-a0f8-5fecfca1d8f2" />
+<img width="1833" height="922" alt="image" src="https://github.com/user-attachments/assets/58c96e54-159b-4a3c-a19e-eb1f4ba73454" />
+<img width="1833" height="922" alt="image" src="https://github.com/user-attachments/assets/516a91c5-f8c2-4514-82c6-48eabb6238a1" />
+<img width="1833" height="922" alt="image" src="https://github.com/user-attachments/assets/e3b2b8e1-421a-4c04-ac1c-ac52f46beeae" />
+<img width="1833" height="922" alt="image" src="https://github.com/user-attachments/assets/1d0fc6da-d62f-41e9-9e62-efc81edc79d8" />
+<img width="794" height="762" alt="image" src="https://github.com/user-attachments/assets/cc189098-c53d-429e-81ad-e20a2040811c" />
+
 ### Installation
 ```bash
 # Clone the repository
@@ -57,14 +65,4 @@ Run migrations or import the schema file.
 Deployed with Nginx reverse proxy + SSL (Let's Encrypt).
 
 CI/CD pipelines set up with GitHub Actions for automated builds and deploys.
-
-# Below are some of the attached files showing the payroll UI
-
-<img width="1833" height="922" alt="image" src="https://github.com/user-attachments/assets/6acce088-75b1-4dab-a0f8-5fecfca1d8f2" />
-<img width="1833" height="922" alt="image" src="https://github.com/user-attachments/assets/58c96e54-159b-4a3c-a19e-eb1f4ba73454" />
-<img width="1833" height="922" alt="image" src="https://github.com/user-attachments/assets/516a91c5-f8c2-4514-82c6-48eabb6238a1" />
-<img width="1833" height="922" alt="image" src="https://github.com/user-attachments/assets/e3b2b8e1-421a-4c04-ac1c-ac52f46beeae" />
-<img width="1833" height="922" alt="image" src="https://github.com/user-attachments/assets/1d0fc6da-d62f-41e9-9e62-efc81edc79d8" />
-<img width="794" height="762" alt="image" src="https://github.com/user-attachments/assets/cc189098-c53d-429e-81ad-e20a2040811c" />
-
 
